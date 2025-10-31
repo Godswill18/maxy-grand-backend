@@ -1,0 +1,35 @@
+{
+  "name": "maxy-grand-backend",
+  "version": "1.0.0",
+  "description": "maxy-grand",
+  "main": "backend/api/index.js",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development nodemon backend/api/index.js",
+    "start": "cross-env NODE_ENV=production node backend/api/index.js",
+    "start:dev": "cross-env NODE_ENV=development node backend/api/index.js",
+    "start:prod": "cross-env NODE_ENV=production node backend/api/index.js",
+    "build": "echo '🏗️  Building Node.js application....' && echo '✅ Build successful - No compilation needed for Node.js'"
+  },
+  "author": "godswill okhamera",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "cross-env": "^10.1.0",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.2",
+    "multer": "^2.0.2",
+    "nodemon": "^3.1.10",
+    "package_name": "^1.0.2",
+    "uuid": "^13.0.0"
+  }
+}

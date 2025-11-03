@@ -11,6 +11,9 @@ import corsOptions from '../config/corsOptions.js';
 import hotelBranchRoutes from '../routes/hotelRoutes.js';
 import usersRoutes from '../routes/usersRoutes.js';
 import roomsRoutes from '../routes/roomsRoutes.js';
+import receptionistRoute from '../routes/receptionistRoute.js';
+import bookingRoutes from '../routes/bookingRoutes.js';
+import menuItemRoutes from '../routes/menuItemRoutes.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +28,12 @@ if (!process.env.MONGO_URI) {
 connectDB(); // Connect to MongoDB using the connectDB function
 
 const app = express();
+
+// ✅ This parses incoming JSON requests
+app.use(express.json());
+
+// (Optional) For form submissions
+app.use(express.urlencoded({ extended: true }));
 
 // ------------ CORS configuration -----------
 app.use(cors(corsOptions));
@@ -50,6 +59,9 @@ app.use(logger);
 app.use('/api/users', usersRoutes); // to handle user related routes
 app.use('/api/hotels', hotelBranchRoutes); // to get hotel branches
 app.use('/api/rooms', roomsRoutes); // to get hotel branches
+app.use('/api/receptionist', receptionistRoute); // receptionist routes
+app.use('/api/bookings', bookingRoutes); // booking routes
+app.use('api/menu', menuItemRoutes); // menu item routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

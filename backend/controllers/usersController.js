@@ -22,6 +22,11 @@ export const signUp = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email already exists" });
     }
 
+    const existingPhone = await User.findOne({ phoneNumber });
+    if (existingPhone) {
+      return res.status(400).json({ success: false, message: "Phone number already exists" });
+    }
+
     if (password.length < 4) {
       return res.status(400).json({ success: false, message: "Password must be at least 4 characters long" });
     }

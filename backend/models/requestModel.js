@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-const invoiceSchema = new mongoose.Schema({
+const requestSchema = new mongoose.Schema({
     hotelId:{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Hotel',
@@ -37,6 +37,6 @@ const invoiceSchema = new mongoose.Schema({
 
 }, {timestamps: true});
 
-const Invoice = mongoose.model('Invoice', invoiceSchema);
+const Request = mongoose.model('Request', requestSchema);
 
-export default Invoice;
+export default Request;

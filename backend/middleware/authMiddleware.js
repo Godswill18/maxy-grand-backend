@@ -16,7 +16,8 @@ export const isStaffOrAdmin = (req, res, next) => {
 
   // Check if the user's role is one of the allowed roles
   if (
-    userRole === 'staff' ||
+    userRole === 'cleaner' ||
+    userRole === 'receptionist' ||
     userRole === 'admin' ||
     userRole === 'superadmin'
   ) {
@@ -29,4 +30,45 @@ export const isStaffOrAdmin = (req, res, next) => {
     success: false,
     error: "Forbidden: You do not have the required permissions.",
   });
+};
+
+
+export const adminMiddleware = (req, res, next) => {
+  // This middleware assumes 'authMiddleware' has already run
+  // and attached the user to req.user.
+  if (req.user && req.user.role === 'admin') {
+    next(); // User is an admin, proceed
+  } else {
+    // 403 Forbidden: User is authenticated, but lacks permission
+    res.status(403).json({ message: 'Access denied. Admin role required.' });
+  }
+};
+
+/**
+ * @desc    Superadmin Authorization Middleware
+ * Checks if the logged-in user has a 'superadmin' role
+ * @access  Private (Superadmin)
+ */
+export const superAdminMiddleware = (req, res, next) => {
+  // This middleware also assumes 'authMiddleware' has run first.
+  if (req.user && req.user.role === 'superadmin') {
+    next(); // User is a superadmin, proceed
+  } else {
+    // 403 Forbidden: User is authenticated, but lacks permission
+    res.status(403).json({ message: 'Access denied. Superadmin role required.' });
+  }
+};
+
+
+/**
+ * @desc    Cleaner Authorization Middleware
+ * Checks if the logged-in user has a 'cleaner' role
+ * @access  Private (Cleaner)
+ */
+export const cleanerMiddleware = (req, res, next) => {
+  if (req.user && req.user.role === 'cleaner') {
+    next(); // User is a cleaner, proceed
+  } else {
+    res.status(403).json({ message: 'Access denied. Cleaner role required.' });
+  }
 };

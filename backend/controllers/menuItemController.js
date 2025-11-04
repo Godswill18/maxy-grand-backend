@@ -46,39 +46,38 @@ export const createMenuItem = async (req, res) => {
   } catch (error) {
     console.error("Error in createMenuItem:", error.message);
     // ... (add file cleanup logic on error like in your roomsController)
+        // --- MODIFICATION: Correctly delete multiple files on error ---
+        if (req.files && req.files.length > 0) {
+          req.files.forEach(file => {
+            try {
+              if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+              }
+            } catch (fileError) {
+              console.error("Error deleting uploaded file:", fileError);
+            }
+          });
+        }
+
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
 
-// 🔄 UPDATE Menu Item
+// 🔄 UPDATE Menu Item (Text-Only)
 export const updateMenuItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
     
-    const item = await MenuItem.findById(id);
-    if (!item) {
+    // 'updates' will only contain text fields like name, price, etc.
+    // 'images' or 'files' are NOT handled here.
+    const updates = req.body; 
+
+    // We can safely remove the old image logic
+    const updatedItem = await MenuItem.findByIdAndUpdate(id, updates, { new: true });
+
+    if (!updatedItem) {
       return res.status(404).json({ success: false, error: "Menu item not found" });
     }
-
-    // Handle image updates (same as your updateRoom)
-    if (req.files && req.files.length > 0) {
-      // Delete old images
-      if (item.images && item.images.length > 0) {
-        item.images.forEach((imgPath) => {
-          try {
-            const fullPath = path.resolve(imgPath);
-            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-          } catch (err) {
-            console.error(`Failed to delete old image: ${imgPath}`, err.message);
-          }
-        });
-      }
-      // Add new images
-      updates.images = req.files.map(file => file.path);
-    }
-    
-    const updatedItem = await MenuItem.findByIdAndUpdate(id, updates, { new: true });
     
     return res.status(200).json({
       success: true,
@@ -87,10 +86,109 @@ export const updateMenuItem = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in updateMenuItem:", error.message);
-    // ... (add file cleanup logic on error)
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
+
+// ➕ ADD New Images to a Menu Item
+export const addMenuItemImages = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: "No image files were uploaded" });
+    }
+
+    const item = await MenuItem.findById(id);
+    if (!item) {
+      return res.status(404).json({ success: false, error: "Menu item not found" });
+    }
+
+    // Get the paths of the new files
+    const newImagePaths = req.files.map(file => file.path);
+
+    // Add the new image paths to the existing array
+    item.images.push(...newImagePaths);
+    
+    const updatedItem = await item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Images added successfully",
+      data: updatedItem,
+    });
+
+  } catch (error) {
+    console.error("Error in addMenuItemImages:", error.message);
+    
+    // If saving fails, delete the files that just got uploaded
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        try {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        } catch (fileError) {
+          console.error("Error deleting orphaned file:", fileError);
+        }
+      });
+    }
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+
+// 🗑️ DELETE a Specific Image from a Menu Item
+export const deleteMenuItemImage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // The frontend must send the path of the image to delete
+    const { imagePath } = req.body;
+
+    if (!imagePath) {
+      return res.status(400).json({ success: false, error: "Image path is required in the body" });
+    }
+
+    const item = await MenuItem.findById(id);
+    if (!item) {
+      return res.status(404).json({ success: false, error: "Menu item not found" });
+    }
+
+    // Check if the image path actually exists in the item's array
+    if (!item.images.includes(imagePath)) {
+        return res.status(404).json({ success: false, error: "Image not found for this item" });
+    }
+
+    // Filter the array to remove the specified image path
+    item.images = item.images.filter(img => img !== imagePath);
+
+    const updatedItem = await item.save();
+
+    // After successfully saving to DB, delete the file from the server
+    try {
+      const fullPath = path.resolve(imagePath);
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
+    } catch (err) {
+      console.error(`Failed to delete old image: ${imagePath}`, err.message);
+      // Don't fail the whole request, just log the error
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Image deleted successfully",
+      data: updatedItem,
+    });
+
+  } catch (error) {
+    console.error("Error in deleteMenuItemImage:", error.message);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+
 
 // ❌ DELETE Menu Item
 export const deleteMenuItem = async (req, res) => {

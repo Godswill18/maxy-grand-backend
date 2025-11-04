@@ -157,3 +157,39 @@ export const updateOrderStatus = async (req, res) => {
     return res.status(500).json({ success: false, error: "Internal server error" });
 }
 };
+
+export const trackOrdersByIds = async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ success: false, error: "An array of orderIds is required" });
+    }
+
+    // Find all orders where the _id is in the provided array
+    const orders = await Order.find({
+      _id: { $in: orderIds }
+    })
+    .sort({ createdAt: 'desc' });
+    
+    // We also select only the fields an anonymous user should see
+    // This prevents leaking sensitive data like guestId, etc.
+    const safeOrders = orders.map(order => ({
+        _id: order._id,
+        orderStatus: order.orderStatus,
+        items: order.items,
+        totalAmount: order.totalAmount,
+        createdAt: order.createdAt,
+        orderType: order.orderType,
+        roomNumber: order.roomNumber,
+        tableNumber: order.tableNumber,
+        customerName: order.customerName
+    }));
+
+    return res.status(200).json({ success: true, data: safeOrders });
+
+  } catch (error) {
+    console.error("Error in trackOrdersByIds:", error.message);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};

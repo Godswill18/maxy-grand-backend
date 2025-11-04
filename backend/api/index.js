@@ -14,6 +14,9 @@ import roomsRoutes from '../routes/roomsRoutes.js';
 import receptionistRoute from '../routes/receptionistRoute.js';
 import bookingRoutes from '../routes/bookingRoutes.js';
 import menuItemRoutes from '../routes/menuItemRoutes.js';
+import orderRoutes from '../routes/orderRoutes.js';
+import requestsRoutes from '../routes/requestRoutes.js';
+import cleaningRoutes from '../routes/cleaningRoutes.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,7 +64,10 @@ app.use('/api/hotels', hotelBranchRoutes); // to get hotel branches
 app.use('/api/rooms', roomsRoutes); // to get hotel branches
 app.use('/api/receptionist', receptionistRoute); // receptionist routes
 app.use('/api/bookings', bookingRoutes); // booking routes
-app.use('api/menu', menuItemRoutes); // menu item routes
+app.use('/api/menu', menuItemRoutes); // menu item routes
+app.use('/api/orders', orderRoutes); // menu item routes
+app.use('/api/requests', requestsRoutes); // maintenance/request routes
+app.use('/api/cleaning', cleaningRoutes); // cleaning staff routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

@@ -6,7 +6,8 @@ import {
   getOrderStatus,
   getAllOrders,
   updateOrderStatus,
-  getMyOrders
+  getMyOrders,
+  trackOrdersByIds
 } from '../controllers/orderController.js';
 
 const router = express.Router();
@@ -17,12 +18,15 @@ router.post('/', createOrder); // protectedRoute is optional here
 // GET /api/orders/my-orders    -> Get order history for logged-in user
 router.get('/my-orders', protectedRoute, getMyOrders);
 // GET /api/orders/:id          -> Get status of a single order
-router.get('/:id', getOrderStatus);
+router.get('/:id/get-status', protectedRoute, getOrderStatus);
+
+// POST /api/orders/track
+router.post('/track', trackOrdersByIds);
 
 
 // --- Staff/Admin Routes (Protected) ---
 // GET /api/orders/all          -> Get all orders for kitchen/bar
-router.get('/all', protectedRoute, isStaffOrAdmin, getAllOrders);
+router.get('/all-orders', protectedRoute, isStaffOrAdmin, getAllOrders);
 // PATCH /api/orders/:id/status -> Update an order's status
 router.patch('/:id/status', protectedRoute, isStaffOrAdmin, updateOrderStatus);
 

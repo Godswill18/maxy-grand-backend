@@ -9,7 +9,9 @@ import {
 // Import all required middleware
 import {
   adminMiddleware,
-  cleanerMiddleware, // Import the new middleware
+  cleanerMiddleware,
+  isStaffOrAdmin, 
+  adminAndSuperAdminMiddleware
 } from '../middleware/authMiddleware.js';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
 
@@ -34,14 +36,14 @@ router.patch(
 router.post(
   '/',
   protectedRoute,
-  adminMiddleware,
+  adminAndSuperAdminMiddleware,
   createCleaningRequest
 );
 
 router.get(
   '/hotel',
   protectedRoute,
-  adminMiddleware,
+  isStaffOrAdmin,
   getHotelCleaningRequests
 );
 

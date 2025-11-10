@@ -1,18 +1,24 @@
 import express from 'express';
 import { protectedRoute} from '../middleware/protectedRoutes.js';
-import { getActiveHotelBranch, getHotelBranch_admin , createHotelBranch, updateBranch, deleteBranch} from '../controllers/hotelsController.js';
-import { isStaffOrAdmin } from '../middleware/authMiddleware.js';
+import { getActiveHotelBranch, getHotelBranch_admin , createHotelBranch, updateBranch, getSingleBranch, getSingleBranchUser, getMyBranch, deleteBranch} from '../controllers/hotelsController.js';
+import { adminMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.get('/getActive-branch', getActiveHotelBranch);
 
-router.get('/getHotel-branch-admin', protectedRoute, isStaffOrAdmin ,getHotelBranch_admin);
+router.get('/getHotel-branch-admin', protectedRoute, superAdminMiddleware ,getHotelBranch_admin);
 
-router.post('/createHotel-branch', protectedRoute, isStaffOrAdmin, createHotelBranch);
+router.post('/createHotel-branch', protectedRoute, superAdminMiddleware, createHotelBranch);
 
-router.put('/update-branch/:id', protectedRoute, updateBranch);
+router.put('/update-branch/:id', protectedRoute, superAdminMiddleware, updateBranch);
 
-router.delete('/delete-branch/:id', protectedRoute, deleteBranch);
+router.get('/get-single-branch/:id', protectedRoute, superAdminMiddleware, getSingleBranch);
+
+router.get('/get-single-branch-public/:id', getSingleBranchUser);
+
+router.get('/get-admin-branch/:id', protectedRoute, adminMiddleware, getMyBranch);
+
+router.delete('/delete-branch/:id', protectedRoute, superAdminMiddleware, deleteBranch);
 
 export default router;

@@ -33,7 +33,7 @@ export const createRoom = async (req, res) => {
         }
       });
     }
-        return res.status(400).json({ message: "Room number is required" });
+        return res.status(400).json({ message: "All fields are is required" });
 
     }
 
@@ -257,6 +257,17 @@ export const deleteRoom = async (req, res) => {
    } catch (error) {
      console.error("Error in deleteRoomType:", error.message);
        // This error handling for req.file seems wrong for 'delete'
+        if (req.files && req.files.length > 0) {
+          req.files.forEach(file => {
+            try {
+              if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+              }
+            } catch (fileError) {
+              console.error("Error deleting uploaded file:", fileError);
+            }
+          });
+        }
        // It should be fine to just return the 500 error
      return res.status(500).json({ success: false, error: "Internal server error" });
    }

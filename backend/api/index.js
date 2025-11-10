@@ -1,6 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import http from 'http'; // 1. Import http
+import { Server } from 'socket.io'; // 2. Import socket.io
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'path';
@@ -17,6 +19,8 @@ import menuItemRoutes from '../routes/menuItemRoutes.js';
 import orderRoutes from '../routes/orderRoutes.js';
 import requestsRoutes from '../routes/requestRoutes.js';
 import cleaningRoutes from '../routes/cleaningRoutes.js';
+import galleryRoutes from '../routes/galleryRoutes.js';
+import postRoutes from '../routes/postRoutes.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +35,15 @@ if (!process.env.MONGO_URI) {
 connectDB(); // Connect to MongoDB using the connectDB function
 
 const app = express();
+
+// Create HTTP server and integrate Socket.io
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: [corsOptions.origin], // Your frontend URL
+    credentials: true,
+  },
+});
 
 // ✅ This parses incoming JSON requests
 app.use(express.json());
@@ -57,6 +70,13 @@ app.use(cookieParser());
 // Logger middleware
 app.use(logger);
 
+// Make io accessible to our routers
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+
 
 // Routes
 app.use('/api/users', usersRoutes); // to handle user related routes
@@ -68,18 +88,29 @@ app.use('/api/menu', menuItemRoutes); // menu item routes
 app.use('/api/orders', orderRoutes); // menu item routes
 app.use('/api/requests', requestsRoutes); // maintenance/request routes
 app.use('/api/cleaning', cleaningRoutes); // cleaning staff routes
+app.use('/api/gallery', galleryRoutes); // gallery routes
+app.use('/api/posts', postRoutes); // blog/news post routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));
 
 
-const PORT = process.env.PORT || 8000;
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
+});
+
+const PORT = process.env.PORT || 5000;
 
 mongoose.connection.once('open', () => {
   console.log('✅ MongoDB Connected Successfully');
   console.log(`🚀 Server Environment: ${process.env.NODE_ENV || 'development'}`);
 
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`🎉 Server running successfully on port ${PORT}`);
     console.log(`📍 Server URL: http://localhost:${PORT}`);
     console.log(`🔗 Health check: GET /`);

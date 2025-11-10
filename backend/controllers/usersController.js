@@ -48,6 +48,26 @@ export const signUp = async (req, res) => {
     await newUser.save();
     const token = generateTokenAndSetCookie(newUser._id);
 
+    // Emit socket event for new user creation (if socket is available on the request)
+    try {
+      if (req && req.io && typeof req.io.emit === 'function') {
+        const payload = {
+          _id: newUser._id,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          email: newUser.email,
+          role: newUser.role,
+          hotelId: newUser.hotelId,
+        };
+        // Emit a general event and a role-specific event
+        req.io.emit('user:created', payload);
+        req.io.emit(`user:created:role:${newUser.role}`, payload);
+        if (newUser.hotelId) req.io.emit(`hotel:${newUser.hotelId}:user:created`, payload);
+      }
+    } catch (emitErr) {
+      console.error('Socket emit error in signUp:', emitErr.message || emitErr);
+    }
+
     res.status(201).json({
       success: true,
       message: "User registered successfully",
@@ -116,6 +136,22 @@ export const login = async (req, res) => {
 
 }
 
+export const getAdmins = async (req, res) => {
+  try {
+    // Find users with the role 'admin'
+    const admins = await User.find({ role: 'admin' }).select('-password');
+    
+    res.status(200).json({ 
+      success: true, 
+      data: admins 
+    });
+
+  } catch (error) {
+    console.error("Error in getAdmins:", error.message);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
 export const logout = async (req, res) => {
     try{
         res.cookie("jwt", "", {maxAge: 0});
@@ -137,3 +173,121 @@ export const getUser = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 }
+
+export const getAllStaff = async (req, res) => {
+    try{
+        // Find users with roles other than 'guest' and 'superadmin'
+        const staffRoles = ['receptionist', 'cleaner', 'waiter', 'admin'];
+        const staffMembers = await User.find({ role: { $in: staffRoles } }).select('-password');
+        res.status(200).json({ success: true, data: staffMembers });
+    }catch(error){
+        console.error("Error in getAllStaff:", error.message);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+}
+
+export const updateStaffStatus = async (req, res) => {
+    try{
+    const staffId = req.params.id;
+    const { isActive, userIds, role, hotelId } = req.body;
+
+    // Validate isActive boolean
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ success: false, message: "Invalid input: isActive must be boolean" });
+    }
+
+    // 1) If an array of userIds is provided -> update those users
+    if (Array.isArray(userIds) && userIds.length > 0) {
+      const updateResult = await User.updateMany({ _id: { $in: userIds } }, { isActive });
+      const updatedUsers = await User.find({ _id: { $in: userIds } }).select('-password');
+      return res.status(200).json({ success: true, modifiedCount: updateResult.modifiedCount, data: updatedUsers });
+    }
+
+    // 2) If role (and optional hotelId) provided -> bulk update by filter
+    if (typeof role === 'string' && role.length > 0) {
+      const filter = { role };
+      if (hotelId) filter.hotelId = hotelId;
+      const updateResult = await User.updateMany(filter, { isActive });
+      const updatedUsers = await User.find(filter).select('-password');
+      return res.status(200).json({ success: true, modifiedCount: updateResult.modifiedCount, data: updatedUsers });
+    }
+
+    // 3) If params.id provided -> update single user
+    if (staffId) {
+      const staffMember = await User.findByIdAndUpdate(staffId, { isActive }, { new: true }).select('-password');
+      if (!staffMember) {
+        return res.status(404).json({ success: false, message: "Staff member not found" });
+      }
+      return res.status(200).json({ success: true, data: staffMember });
+    }
+    
+    // After successfully updating, emit the event so all clients are notified
+    if (req.io) {
+        req.io.emit('staffUpdated', {
+            action: 'update',
+            user: staffMember 
+        });
+      }
+
+    // If none of the above, nothing to do
+    return res.status(400).json({ success: false, message: 'No target specified: provide params.id, userIds array, or role' });
+    }catch(error){
+        console.error("Error in updateStaffStatus:", error.message);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+}
+
+// Emit user created event for a specific user (useful for manual triggers)
+export const emitUserCreated = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ success: false, message: 'userId param required' });
+
+    const user = await User.findById(userId).select('-password');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (req && req.io && typeof req.io.emit === 'function') {
+      req.io.emit('user:created', user);
+      req.io.emit(`user:created:role:${user.role}`, user);
+      if (user.hotelId) req.io.emit(`hotel:${user.hotelId}:user:created`, user);
+    }
+
+    return res.status(200).json({ success: true, message: 'Event emitted', data: user });
+  } catch (error) {
+    console.error('Error in emitUserCreated:', error.message);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
+// Emit staff status update event for a user (or multiple users) without changing DB
+export const emitStaffStatusEvent = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { isActive, userIds } = req.body;
+
+    if (typeof isActive !== 'boolean') return res.status(400).json({ success: false, message: 'isActive must be boolean' });
+
+    // Single user
+    if (userId) {
+      const user = await User.findById(userId).select('-password');
+      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+      if (req && req.io && typeof req.io.emit === 'function') {
+        req.io.emit('staff:statusUpdated', { userId: user._id, isActive });
+      }
+      return res.status(200).json({ success: true, data: { userId: user._id, isActive } });
+    }
+
+    // Multiple users
+    if (Array.isArray(userIds) && userIds.length > 0) {
+      if (req && req.io && typeof req.io.emit === 'function') {
+        userIds.forEach((id) => req.io.emit('staff:statusUpdated', { userId: id, isActive }));
+      }
+      return res.status(200).json({ success: true, modifiedCount: userIds.length });
+    }
+
+    return res.status(400).json({ success: false, message: 'Provide userId or userIds array' });
+  } catch (error) {
+    console.error('Error in emitStaffStatusEvent:', error.message);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};

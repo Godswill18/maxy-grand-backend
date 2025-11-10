@@ -18,6 +18,21 @@ const hotelSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    manager:{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        // required: false,
+    },
+    roomCount:{
+        type: Number,
+        required: true,
+        default: 0,
+    },
+    staffCount:{
+        type: Number,
+        required: true,
+        default: 0,
+    },
     isActive: {
         type: Boolean,
         default: false

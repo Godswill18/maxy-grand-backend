@@ -1,11 +1,13 @@
 import Hotel from "../models/hotelModel.js";
-
+import RoomType from "../models/roomTypeModel.js"; // ✅ Add this
+import fs from "fs";
+import path from "path";
 
 export const createHotelBranch = async (req, res) => {
   try {
-    // Ensure user is authenticated and attached to req.user
     const user = req.user;
 
+    // ✅ Check role
     if (!user || user.role !== "superadmin") {
       return res
         .status(403)
@@ -14,18 +16,34 @@ export const createHotelBranch = async (req, res) => {
 
     const { name, city, address, phoneNumber, manager, roomCount, staffCount, isActive } = req.body;
 
+    // ✅ Validate required fields
     if (!name || !city || !address || !phoneNumber) {
       return res
         .status(400)
         .json({ success: false, message: "Name, city, address, and phone number are required" });
     }
 
+    // ✅ Check for duplicate address
+    const existingBranch = await Hotel.findOne({ address });
+    if (existingBranch) {
+      return res
+        .status(400)
+        .json({ success: false, message: "A hotel branch with this address already exists" });
+    }
+
+      // --- FIX: Handle empty string for manager ---
+    // An empty string ("") cannot be cast to an ObjectId, but null can be.
+    // This treats an empty string as "no manager assigned".
+    const managerId = manager === "" ? null : manager;
+    // --- END FIX ---
+
+    // ✅ Create new branch
     const newHotelBranch = new Hotel({
       name,
       city,
       address,
       phoneNumber,
-        manager,
+      manager: managerId, // <-- Use the cleaned variable here
       roomCount,
       staffCount,
       isActive,
@@ -43,6 +61,7 @@ export const createHotelBranch = async (req, res) => {
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
+
 
 
 export const updateBranch = async (req, res) => {
@@ -217,28 +236,80 @@ export const getMyBranch = async (req, res) => {
     }
 }
 
+export const getHotelList = async (req, res) => {
+  try {
+    // Select only the 'name' field, _id is included by default
+    const hotels = await Hotel.find({}).select('name');
+    res.status(200).json(hotels);
+  } catch (error)
+ {
+    res
+      .status(500)
+      .json({ message: 'Server error fetching hotel list', error: error.message });
+  }
+};
+
 
 export const deleteBranch = async (req, res) => {
-    try{
-        // Ensure user is authenticated and attached to req.user
-        const user = req.user;
-        if (!user || user.role !== "superadmin") {
-          return res
-            .status(403)
-            .json({ success: false, error: "Forbidden — Super Admin access required" });
-        }
-        const branchId = req.params.id;
-        const deletedBranch = await Hotel.findByIdAndDelete(branchId);
-        if(!deletedBranch){
-            return res.status(404).json({ success: false, error: "Hotel branch not found" });
-        }
-        return res.status(200).json({
-            success: true,
-            message: "Hotel branch deleted successfully"
-        });
-    }catch(error){
-        console.error("Error in deleteBranch:", error.message);
-        return res.status(500).json({ success: false, error: "Internal server error" });
+  try {
+    // ✅ Ensure only Super Admin can delete
+    const user = req.user;
+    if (!user || user.role !== "superadmin") {
+      return res
+        .status(403)
+        .json({ success: false, error: "Forbidden — Super Admin access required" });
     }
-}
+
+    const branchId = req.params.id;
+
+    // ✅ Find the branch first
+    const branch = await Hotel.findById(branchId);
+    if (!branch) {
+      return res.status(404).json({ success: false, error: "Hotel branch not found" });
+    }
+
+    // --- NEW LOGIC: Find RoomTypes and delete their images ---
+    
+    // 1. Find all room types associated with this branch
+    const roomTypesToDelete = await RoomType.find({ hotelId: branchId });
+
+    let deletedImageCount = 0;
+
+    // 2. Loop through them and delete their physical image files
+    if (roomTypesToDelete && roomTypesToDelete.length > 0) {
+      for (const roomType of roomTypesToDelete) {
+        if (roomType.images && roomType.images.length > 0) {
+          roomType.images.forEach((imgPath) => {
+            try {
+              // Resolve the full path to the image
+              const fullPath = path.resolve(imgPath);
+              if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath); // Delete the file
+                deletedImageCount++;
+              }
+            } catch (err) {
+              // Log error for a specific image but don't stop the whole process
+              console.error(`Failed to delete image ${imgPath}:`, err.message);
+            }
+          });
+        }
+      }
+    }
+    // --- END NEW LOGIC ---
+
+    // 3. Now, delete all related room types from the database
+    const deletedRoomTypes = await RoomType.deleteMany({ hotelId: branchId });
+
+    // 4. Finally, delete the branch itself
+    await Hotel.findByIdAndDelete(branchId);
+
+    return res.status(200).json({
+      success: true,
+      message: `Hotel branch, ${deletedRoomTypes.deletedCount} room types, and ${deletedImageCount} associated images deleted successfully.`,
+    });
+  } catch (error) {
+    console.error("Error in deleteBranch:", error.message);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
 

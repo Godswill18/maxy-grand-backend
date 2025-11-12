@@ -21,6 +21,9 @@ import requestsRoutes from '../routes/requestRoutes.js';
 import cleaningRoutes from '../routes/cleaningRoutes.js';
 import galleryRoutes from '../routes/galleryRoutes.js';
 import postRoutes from '../routes/postRoutes.js';
+import reportRoutes from '../routes/reportRoutes.js';
+import reviewsRoutes from '../routes/reviewRoutes.js';
+import dashboardRoutes from '../routes/dashboardRoutes.js'
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,6 +93,9 @@ app.use('/api/requests', requestsRoutes); // maintenance/request routes
 app.use('/api/cleaning', cleaningRoutes); // cleaning staff routes
 app.use('/api/gallery', galleryRoutes); // gallery routes
 app.use('/api/posts', postRoutes); // blog/news post routes
+app.use('/api/reports', reportRoutes); // reports routes
+app.use('/api/reviews', reviewsRoutes); // reviews routes
+app.use('/api/dashboard', dashboardRoutes); // dashboard routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

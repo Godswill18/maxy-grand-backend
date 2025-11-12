@@ -1,6 +1,6 @@
 import express from 'express';
 import { protectedRoute} from '../middleware/protectedRoutes.js';
-import { getActiveHotelBranch, getHotelBranch_admin , createHotelBranch, updateBranch, getSingleBranch, getSingleBranchUser, getMyBranch, deleteBranch} from '../controllers/hotelsController.js';
+import { getActiveHotelBranch, getHotelBranch_admin , createHotelBranch, updateBranch, getSingleBranch, getSingleBranchUser, getHotelList, getMyBranch, deleteBranch} from '../controllers/hotelsController.js';
 import { adminMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -18,6 +18,8 @@ router.get('/get-single-branch/:id', protectedRoute, superAdminMiddleware, getSi
 router.get('/get-single-branch-public/:id', getSingleBranchUser);
 
 router.get('/get-admin-branch/:id', protectedRoute, adminMiddleware, getMyBranch);
+
+router.get('/list', protectedRoute, superAdminMiddleware, getHotelList);
 
 router.delete('/delete-branch/:id', protectedRoute, superAdminMiddleware, deleteBranch);
 

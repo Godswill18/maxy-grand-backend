@@ -186,6 +186,34 @@ export const getAllStaff = async (req, res) => {
     }
 }
 
+export const getAllGuests = async (req, res) => {
+  try {
+      // Find users with the role 'guest'
+      const guests = await User.find({ role: 'guest' }).select('-password');
+      res.status(200).json({ 
+        success: true, 
+        data: guests 
+      });
+  } catch (error) {
+    console.error("Error in getAllGuests:", error.message);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+export const getUserById = async (req, res) => {
+    try{
+        const userId = req.params.id;
+        const user = await User.findById(userId).select('-password');
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+        res.status(200).json({ success: true, data: user });
+    } catch (error) {
+        console.error("Error in getUserById:", error.message);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
+
 export const updateStaffStatus = async (req, res) => {
     try{
     const staffId = req.params.id;
@@ -258,6 +286,7 @@ export const emitUserCreated = async (req, res) => {
     return res.status(500).json({ success: false, error: 'Internal server error' });
   }
 };
+
 
 // Emit staff status update event for a user (or multiple users) without changing DB
 export const emitStaffStatusEvent = async (req, res) => {

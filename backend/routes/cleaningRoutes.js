@@ -4,6 +4,7 @@ import {
   getMyPendingTasks,
   completeCleaningTask,
   getHotelCleaningRequests,
+  getCleaningHistory
 } from '../controllers/cleaningController.js';
 
 // Import all required middleware
@@ -11,7 +12,8 @@ import {
   adminMiddleware,
   cleanerMiddleware,
   isStaffOrAdmin, 
-  adminAndSuperAdminMiddleware
+  adminAndSuperAdminMiddleware,
+  superAdminMiddleware
 } from '../middleware/authMiddleware.js';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
 
@@ -46,5 +48,7 @@ router.get(
   isStaffOrAdmin,
   getHotelCleaningRequests
 );
+
+router.get('/get-cleaning-history', protectedRoute, superAdminMiddleware, getCleaningHistory);
 
 export default router;

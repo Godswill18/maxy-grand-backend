@@ -109,106 +109,239 @@ export const createRoom = async (req, res) => {
 };
 
 
-export const updateRoom = async (req, res) => {
-   try {
-    const user = req.user;
-    if (!user || (user.role !== "superadmin" && user.role !== "admin")) {
-      return res.status(403).json({
-        success: false,
-        error: "Forbidden — Super Admin or Admin access required",
-      });
-    }
+// export const updateRoom = async (req, res) => {
+//   try {
+//     const roomId = req.params.id;
 
+//     const { hotelId, name, roomNumber, description, amenities, price, capacity, isAvailable } = req.body;
+
+//     // Parse the retained images (from frontend)
+//     // e.g. frontend sends `existingImages` as JSON string array
+//     let existingImages = [];
+//     if (req.body.existingImages) {
+//       try {
+//         existingImages = JSON.parse(req.body.existingImages);
+//       } catch (err) {
+//         console.error("Invalid JSON in existingImages:", err.message);
+//         existingImages = [];
+//       }
+//     }
+
+//     const room = await RoomType.findById(roomId);
+//     if (!room) {
+//       return res.status(404).json({ success: false, error: "Room not found" });
+//     }
+
+//     // ✅ Validate mandatory fields
+//     if (!hotelId || !name || !roomNumber || !description || !amenities || !price || !capacity) {
+//       // delete uploaded files if validation fails
+//       if (req.files && req.files.length > 0) {
+//         req.files.forEach(file => {
+//           if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+//         });
+//       }
+//       return res.status(400).json({ message: "All fields are required" });
+//     }
+
+//     // ✅ Handle images update
+//     const oldImages = room.images || [];
+//     const newUploads = req.files ? req.files.map(file => file.path) : [];
+
+//     // Determine which images were removed
+//     const removedImages = oldImages.filter(img => !existingImages.includes(img));
+
+//     // Delete removed images from disk
+//     removedImages.forEach(imgPath => {
+//       try {
+//         const fullPath = path.resolve(imgPath);
+//         if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+//       } catch (err) {
+//         console.error(`Error deleting file ${imgPath}:`, err.message);
+//       }
+//     });
+
+//     // Combine retained images + new uploads
+//     const finalImages = [...existingImages, ...newUploads];
+
+//     // ✅ Update room fields
+//     room.hotelId = hotelId;
+//     room.name = name;
+//     room.roomNumber = roomNumber;
+//     room.description = description;
+//     room.amenities = amenities;
+//     room.price = price;
+//     room.capacity = capacity;
+//     room.isAvailable = isAvailable;
+//     room.images = finalImages;
+
+//     const updatedRoom = await room.save();
+
+//     // ✅ Sync room number to Room model
+//     try {
+//       await Room.findOneAndUpdate(
+//         { roomTypeId: updatedRoom._id },
+//         { roomNumber: updatedRoom.roomNumber }
+//       );
+//     } catch (syncError) {
+//       console.error("Error syncing room number:", syncError.message);
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Room updated successfully",
+//       data: updatedRoom,
+//     });
+
+//   } catch (error) {
+//     console.error("Error in updateRoom:", error.message);
+//     if (req.files && req.files.length > 0) {
+//       req.files.forEach(file => {
+//         if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+//       });
+//     }
+//     return res.status(500).json({ success: false, error: "Internal server error" });
+//   }
+// };
+
+
+// 🔄 UPDATE Room (Text-Only)
+export const updateRoom = async (req, res) => {
+  try {
     const roomId = req.params.id;
     
-    // --- MODIFICATION: Added 'roomNumber' ---
-    const { hotelId, name, roomNumber, description, amenities, price, capacity, isAvailable } = req.body;
+    // 'updates' will only contain text fields from req.body
+    // We no longer check for req.files here.
+    const updates = req.body;
+
+    // We can use findByIdAndUpdate for a cleaner text-only update
+    const updatedRoom = await RoomType.findByIdAndUpdate(roomId, updates, {
+      new: true, // Returns the modified document
+      runValidators: true, // Ensures schema validation runs
+    });
+
+    if (!updatedRoom) {
+      return res.status(404).json({ success: false, error: "Room not found" });
+    }
+
+    // --- Logic to SYNC ROOM NUMBER ---
+    // This logic is important and should stay.
+    if (updates.roomNumber) {
+      try {
+        await Room.findOneAndUpdate(
+          { roomTypeId: updatedRoom._id },
+          { roomNumber: updatedRoom.roomNumber }
+        );
+      } catch (syncError) {
+        console.error("Error syncing room number to Room model:", syncError.message);
+        // This is not a fatal error, so we just log it
+      }
+    }
+    // --- END SYNC LOGIC ---
+
+    return res.status(200).json({
+      success: true,
+      message: "Room details updated successfully",
+      data: updatedRoom,
+    });
+  } catch (error) {
+    console.error("Error in updateRoom:", error.message);
+    // No need to delete files on error, as none were uploaded.
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+// ➕ ADD New Images to a Room
+export const addRoomImages = async (req, res) => {
+  try {
+    const roomId = req.params.id;
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: "No image files were uploaded" });
+    }
 
     const room = await RoomType.findById(roomId);
     if (!room) {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
 
-    if( !hotelId || !name || !roomNumber || !description || !amenities || !price || !capacity ) {
+    // Get the paths of the new files
+    const newImagePaths = req.files.map(file => file.path);
 
-        if (req.files && req.files.length > 0) {
-            req.files.forEach(file => {
-            try {
-            if (fs.existsSync(file.path)) {
-                fs.unlinkSync(file.path);
-            }
-            } catch (fileError) {
-            console.error("Error deleting uploaded file:", fileError);
-            }
-        });
-        }
-
-        return res.status(400).json({ message: "All fields are required" });
-    }
-
-    // If new images are uploaded, delete the old ones first
-    if (req.files && req.files.length > 0) {
-      if (room.images && room.images.length > 0) {
-        room.images.forEach((imgPath) => {
-          try {
-            const fullPath = path.resolve(imgPath);
-            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-          } catch (err) {
-            console.error(`Failed to delete old image: ${imgPath}`, err.message);
-          }
-        });
-      }
-      // Replace with new images
-      room.images = req.files.map(file => file.path);
-    }
-
-    // Update the rest of the fields
-    room.hotelId = hotelId;
-    room.name = name;
-    room.roomNumber = roomNumber; // <-- Added 'roomNumber' here
-    room.description = description;
-    room.amenities = amenities;
-    room.price = price;
-    room.capacity = capacity;
-    room.isAvailable = isAvailable;
-
+    // Add the new image paths to the existing array
+    room.images.push(...newImagePaths);
+    
     const updatedRoom = await room.save();
-
-    // --- 3. START: NEW LOGIC TO SYNC ROOM NUMBER ---
-    try {
-        await Room.findOneAndUpdate(
-            { roomTypeId: updatedRoom._id }, 
-            { roomNumber: updatedRoom.roomNumber }
-        );
-    } catch (syncError) {
-        console.error("Error syncing room number to Room model:", syncError.message);
-        // This is not a fatal error, so we just log it
-    }
-    // --- END: NEW LOGIC ---
 
     return res.status(200).json({
       success: true,
-      message: "Room updated successfully",
+      message: "Images added successfully",
       data: updatedRoom,
     });
-   } catch (error) {
-     console.error("Error in updateRoomType:", error.message);
-        // --- MODIFICATION: Correctly delete multiple files on error ---
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
-            try {
-              if (fs.existsSync(file.path)) {
-                fs.unlinkSync(file.path);
-              }
-            } catch (fileError) {
-              console.error("Error deleting uploaded file:", fileError);
-            }
-          });
+  } catch (error) {
+    console.error("Error in addRoomImages:", error.message);
+    
+    // If saving fails, delete the files that just got uploaded
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        try {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        } catch (fileError) {
+          console.error("Error deleting orphaned file:", fileError);
         }
-     return res.status(500).json({ success: false, error: "Internal server error" });
-   }
+      });
+    }
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
 };
 
+// ➖ DELETE a Single Image from a Room
+export const deleteRoomImage = async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    // Get the path of the image to delete from the request body
+    const { imagePath } = req.body;
+
+    if (!imagePath) {
+      return res.status(400).json({ success: false, error: "Image path is required" });
+    }
+
+    const room = await RoomType.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ success: false, error: "Room not found" });
+}
+    // Check if the image exists in the array
+    if (!room.images.includes(imagePath)) {
+      return res.status(404).json({ success: false, error: "Image not found in this room" });
+    }
+
+    // 1. Delete the physical file from the server
+    try {
+      const fullPath = path.resolve(imagePath);
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
+    } catch (fileError) {
+      console.error("Error deleting file:", fileError.message);
+      // We can still proceed to remove it from the DB
+    }
+
+    // 2. Remove the image path from the database array
+    room.images = room.images.filter(img => img !== imagePath);
+    
+    const updatedRoom = await room.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Image deleted successfully",
+      data: updatedRoom,
+    });
+  } catch (error) {
+    console.error("Error in deleteRoomImage:", error.message);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
 
 
 export const deleteRoom = async (req, res) => {

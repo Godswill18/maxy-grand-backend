@@ -9,6 +9,7 @@ import {
   getUserBookings,
   checkoutRoom,
 } from '../controllers/bookingController.js';
+import { isStaffOrAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ const router = express.Router();
 router.post('/create', protectedRoute, createBooking);
 
 // Get all bookings (Admin/Receptionist)
-router.get('/all', protectedRoute, getAllBookings);
+router.get('/all', protectedRoute, isStaffOrAdmin, getAllBookings);
 
 // Get a single booking by ID
 router.get('/:id', protectedRoute, getBookingById);

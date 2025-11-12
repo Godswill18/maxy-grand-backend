@@ -7,11 +7,32 @@ import mongoose from 'mongoose';
  * @route   POST /api/cleaning
  * @access  Private (Admin)
  */
+
+const emitUpdatedTasks = async (io, hotelId) => {
+  try {
+    // Logic from getHotelCleaningRequests
+    const requests = await CleaningRequest.find({ hotelId })
+      .populate('roomId', 'roomNumber status')
+      .populate('assignedCleaner', 'name email')
+      .populate('requestedBy', 'name')
+      .sort({ createdAt: -1 });
+
+    // Emit the update to all connected clients
+    // For multi-tenant apps, you'd use rooms: io.to(hotelId).emit(...)
+    io.emit('cleaning:update', requests);
+    
+  } catch (error) {
+    console.error('Error emitting task update:', error);
+  }
+};
+
+
 export const createCleaningRequest = async (req, res) => {
   try {
     const { roomId, assignedCleanerId, notes } = req.body;
     const requestedById = req.user.id;
     const hotelId = req.user.hotelId; // Assumes admin is logged in and tied to a hotel
+    const io = req.io; // Get io from middleware
 
     // Validate input
     if (!roomId || !assignedCleanerId) {
@@ -42,9 +63,9 @@ export const createCleaningRequest = async (req, res) => {
     });
     const createdRequest = await request.save();
 
-    // 2. **Update the Room's status** to 'cleaning'
-    room.status = 'cleaning';
-    await room.save();
+    await Room.findByIdAndUpdate(roomId, { status: 'cleaning' });
+
+    await emitUpdatedTasks(io, hotelId);
 
     res.status(201).json(createdRequest);
   } catch (error) {
@@ -92,6 +113,7 @@ export const completeCleaningTask = async (req, res) => {
   try {
     const { id: requestId } = req.params;
     const cleanerId = req.user.id; // Get ID from auth middleware
+    const io = req.io; // Get io from middleware
 
     // Validate ID
     if (!mongoose.Types.ObjectId.isValid(requestId)) {
@@ -123,6 +145,9 @@ export const completeCleaningTask = async (req, res) => {
     // We trust the request's roomId is correct
     await Room.findByIdAndUpdate(request.roomId, { status: 'available' });
 
+    // We need the hotelId from the request
+    await emitUpdatedTasks(io, request.hotelId);
+
     res.status(200).json({ message: 'Task marked as complete', request: updatedRequest });
   } catch (error) {
     res.status(500).json({ message: 'Server error completing task', error: error.message });
@@ -147,5 +172,21 @@ export const getHotelCleaningRequests = async (req, res) => {
       res.status(200).json(requests);
     } catch (error) {
       res.status(500).json({ message: 'Server error fetching requests', error: error.message });
+    }
+  };
+
+  export const getCleaningHistory = async (req, res) => {
+    try {
+      // const hotelId = req.user.hotelId;
+
+      const history = await CleaningRequest.find()
+        .populate('roomId', 'roomNumber status')
+        .populate('assignedCleaner', 'name email')
+        .populate('requestedBy', 'name')
+        .sort({ createdAt: -1 });
+
+      res.status(200).json(history);
+    } catch (error) {
+      res.status(500).json({ message: 'Server error fetching history', error: error.message });
     }
   };

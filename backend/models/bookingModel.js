@@ -65,6 +65,11 @@ const bookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'checked-in', 'checked-out', 'cancelled'],
     default: 'pending',
   },
+  confirmationCode: {
+    type: String,
+    required: true,
+    unique: true,
+  },
 }, { timestamps: true });
 
 const Booking = mongoose.model('Booking', bookingSchema);

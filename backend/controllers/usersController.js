@@ -265,6 +265,47 @@ export const updateStaffStatus = async (req, res) => {
     }
 }
 
+export const updateStaffRole = async (req, res) => {
+  try {
+    const { id } = req.params; // staff ID
+    const { newRole } = req.body;
+
+    if (!newRole) {
+      return res.status(400).json({ success: false, message: "Role is required" });
+    }
+
+    // Validate allowed roles
+    const validRoles = ['admin', 'receptionist', 'cleaner', 'waiter'];
+    if (!validRoles.includes(newRole)) {
+      return res.status(400).json({ success: false, message: "Invalid role provided" });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Staff not found" });
+    }
+
+    // Prevent superadmin modification
+    if (user.role === 'superadmin') {
+      return res.status(403).json({ success: false, message: "Cannot modify superadmin role" });
+    }
+
+    user.role = newRole;
+    await user.save();
+
+    // Emit update event to all connected clients
+    if (req.io) {
+      req.io.emit("staffUpdated", { action: "update", user });
+    }
+
+    res.status(200).json({ success: true, message: "Staff role updated successfully", data: user });
+  } catch (error) {
+    console.error("Error in updateStaffRole:", error.message);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
 // Emit user created event for a specific user (useful for manual triggers)
 export const emitUserCreated = async (req, res) => {
   try {

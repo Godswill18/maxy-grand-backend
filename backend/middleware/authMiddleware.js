@@ -85,3 +85,11 @@ export const cleanerMiddleware = (req, res, next) => {
     res.status(403).json({ message: 'Access denied. Cleaner role required.' });
   }
 };
+
+export const receptionistMiddleware = (req, res, next) => {
+  if (req.user && req.user.role === 'receptionist') {
+    next(); // User is a receptionist, proceed
+  } else {
+    res.status(403).json({ message: 'Access denied. Receptionist role required.' });
+  }
+};

@@ -1,13 +1,22 @@
 // backend/controllers/bookingController.js
 import Booking from '../models/bookingModel.js';
 import Room from '../models/roomModel.js';
+import { generateConfirmationCode } from '../lib/utils/codeGenerator.js';
+import RoomType from '../models/roomTypeModel.js';
 
 // Helper function to get a fully populated booking
 const getPopulatedBooking = async (id) => {
   return await Booking.findById(id)
     .populate('hotelId', 'name')
-    .populate('roomId', 'roomNumber')
-    .populate('guestId', 'fullName email');
+    .populate({
+        path: 'roomId',
+        select: 'roomNumber', // Just get the room number
+        populate: {
+            path: 'roomTypeId', // Get room type info
+            select: 'name price'
+        }
+    })
+    .populate('guestId', 'firstName lastName email');
 };
 
 
@@ -18,10 +27,10 @@ const getPopulatedBooking = async (id) => {
  */
 export const createBooking = async (req, res) => {
   try {
-    const user = req.user; // Authenticated user (if online booking)
+    const user = req.user;
     const {
       hotelId,
-      roomId,
+      roomId, 
       guestName,
       guestEmail,
       guestPhone,
@@ -32,27 +41,62 @@ export const createBooking = async (req, res) => {
       amountPaid,
     } = req.body;
 
-    // 1️⃣ Validate room
+    // 1️⃣ Validate input dates
+    if (new Date(checkOutDate) <= new Date(checkInDate)) {
+      return res.status(400).json({ success: false, error: 'Check-out date must be after check-in date' });
+    }
+
+    // 2️⃣ Find the specific room
+    // console.log('BookingController: Looking for room with ID:', roomId);
     const room = await Room.findById(roomId);
+    // console.log('BookingController: Found room:', room);
     if (!room) {
       return res.status(404).json({ success: false, error: 'Room not found' });
     }
-    if (room.status !== 'available') {
-      return res.status(400).json({ success: false, error: 'Room is not available' });
-    }
 
-    // 2️⃣ Determine guest type
+    // 3️⃣ ⭐️ --- NEW AVAILABILITY LOGIC --- ⭐️
+    // Check for any bookings for this room that conflict with the requested dates.
+    // An overlap exists if:
+    // (Existing Check-in < New Check-out) AND (Existing Check-out > New Check-in)
+    const conflictingBooking = await Booking.findOne({
+      roomId: roomId,
+      bookingStatus: { $in: ['confirmed', 'checked-in'] }, // Only check active bookings
+      $and: [
+        { checkInDate: { $lt: new Date(checkOutDate) } },
+        { checkOutDate: { $gt: new Date(checkInDate) } },
+      ]
+    });
+
+    if (conflictingBooking) {
+      return res.status(400).json({
+        success: false,
+        error: `Room ${room.roomNumber} is already booked from ${new Date(conflictingBooking.checkInDate).toLocaleDateString()} to ${new Date(conflictingBooking.checkOutDate).toLocaleDateString()}`,
+      });
+    }
+    // ⭐️ --- END NEW LOGIC --- ⭐️
+
+    // 4️⃣ Determine guest type
     const guestId = bookingType === 'online' ? user._id : null;
 
-    // 3️⃣ Determine payment status
+    // 5️⃣ Determine payment status
     let paymentStatus = 'pending';
     if (amountPaid >= totalAmount) paymentStatus = 'paid';
     else if (amountPaid > 0) paymentStatus = 'partial';
 
-    // 4️⃣ Create booking record
+    let confirmationCode = '';
+    let isCodeUnique = false;
+    while (!isCodeUnique) {
+      confirmationCode = generateConfirmationCode(6); // Generate a 6-char code
+      const existingBooking = await Booking.findOne({ confirmationCode });
+      if (!existingBooking) {
+        isCodeUnique = true;
+      }
+    }
+
+    // 6️⃣ Create booking record (using 'roomId')
     const booking = new Booking({
       hotelId,
-      roomId,
+      roomId, // <-- FIX: Save 'roomId'
       guestId,
       guestName,
       guestEmail,
@@ -63,32 +107,35 @@ export const createBooking = async (req, res) => {
       totalAmount,
       amountPaid,
       paymentStatus,
-      bookingStatus: 'confirmed', // Default status
+      bookingStatus: 'confirmed',
+      confirmationCode: confirmationCode
     });
 
     const savedBooking = await booking.save();
 
-    // 5️⃣ Update room status
-    room.status = 'occupied'; // Or 'booked' if you have that status
-    room.bookedBy = guestId;
-    room.checkInDate = checkInDate;
-    room.checkOutDate = checkOutDate;
-    room.isOnlineBooking = bookingType === 'online';
-    room.currentBookingId = savedBooking._id; // 🔗 link current booking
-    await room.save();
+    // 7️⃣ Update room status ONLY if it's currently 'available'
+    // This booking is for the future, but we mark it as 'reserved'
+    // so a walk-in can't take it right now.
+    // Your check-in logic will handle changing it to 'occupied'.
+    if (room.status === 'available') {
+        room.status = 'reserved';
+        await room.save();
+    }
+    // NOTE: We DO NOT set room.currentBookingId here.
+    // That should only be set when the guest *actually checks in*.
+    // The `updateBookingStatus` function handles this.
 
     // --- Socket.io Emit ---
     const populatedBooking = await getPopulatedBooking(savedBooking._id);
     req.io.emit('bookingCreated', populatedBooking);
-    // --- End Emit ---
-
+    
     // ✅ Notify all connected clients that reports should refresh
-    io.emit('report:update');
+    // io.emit('report:update'); // 'io' is not defined here, use req.io
 
     return res.status(201).json({
       success: true,
       message: 'Booking created successfully',
-      data: populatedBooking, // Send populated data back
+      data: populatedBooking,
     });
   } catch (error) {
     console.error('Error creating booking:', error.message);
@@ -109,7 +156,7 @@ export const getAllBookings = async (req, res) => {
 
     const bookings = await Booking.find()
       .populate('hotelId', 'name')
-      .populate('roomId', 'roomNumber')
+      .populate('roomTypeId', 'roomNumber')
       .populate('guestId', 'fullName email')
       .sort({ createdAt: -1 }); // Sort by newest first
 
@@ -152,31 +199,26 @@ export const updateBookingStatus = async (req, res) => {
     if (paymentStatus) booking.paymentStatus = paymentStatus;
     if (amountPaid !== undefined) booking.amountPaid = amountPaid;
 
-    // Update room status if necessary
-    const room = await Room.findById(booking.roomId);
+    // Update room status
+    const room = await Room.findById(booking.roomId); // <-- FIX: use roomId
     if (room) {
       if (bookingStatus === 'checked-out' || bookingStatus === 'cancelled') {
-        room.status = 'available'; // Or 'cleaning'
+        room.status = 'cleaning'; // <-- Better than 'available'
         room.currentBookingId = null;
-        room.bookedBy = null;
-        room.checkInDate = null;
-        room.checkOutDate = null;
       }
       if (bookingStatus === 'checked-in') {
         room.status = 'occupied';
+        room.currentBookingId = booking._id; // <-- SET current booking
       }
       if (bookingStatus === 'confirmed') {
-        room.status = 'occupied'; // Or 'booked'
+        room.status = 'reserved'; // <-- FIX: 'confirmed' is 'reserved', not 'occupied'
       }
       await room.save();
     }
 
     const updatedBooking = await booking.save();
-
-    // --- Socket.io Emit ---
     const populatedBooking = await getPopulatedBooking(updatedBooking._id);
     req.io.emit('bookingUpdated', populatedBooking);
-    // --- End Emit ---
 
     return res.status(200).json({
       success: true,
@@ -206,7 +248,7 @@ export const deleteBooking = async (req, res) => {
     const bookingId = booking._id; // Save ID for emit
 
     // Free up the room
-    const room = await Room.findById(booking.roomId);
+    const room = await Room.findById(booking.roomTypeId);
     if (room && room.currentBookingId?.toString() === bookingId.toString()) {
       room.status = 'available';
       room.bookedBy = null;
@@ -239,7 +281,7 @@ export const getUserBookings = async (req, res) => {
     const userId = req.params.userId;
     const bookings = await Booking.find({ guestId: userId })
       .populate('hotelId', 'name')
-      .populate('roomId', 'roomNumber');
+      .populate('roomTypeId', 'roomNumber');
 
     return res.status(200).json({ success: true, data: bookings });
   } catch (error) {
@@ -250,14 +292,14 @@ export const getUserBookings = async (req, res) => {
 
 /**
  * @desc Checkout a room (alternative to updateBookingStatus)
- * @route PUT /api/bookings/checkout/:roomId
+ * @route PUT /api/bookings/checkout/:roomTypeId
  */
 export const checkoutRoom = async (req, res) => {
   try {
-    const { roomId } = req.params;
+    const { roomTypeId } = req.params;
 
     // 1️⃣ Find room
-    const room = await Room.findById(roomId);
+    const room = await Room.findById(roomTypeId);
     if (!room) return res.status(404).json({ success: false, error: 'Room not found' });
     if (!room.currentBookingId)
       return res.status(400).json({ success: false, error: 'No active booking for this room' });
@@ -286,7 +328,7 @@ export const checkoutRoom = async (req, res) => {
       success: true,
       message: 'Room checked out successfully',
       data: {
-        roomId: room._id,
+        roomTypeId: room._id,
         bookingId: booking ? booking._id : null,
         status: room.status,
       },

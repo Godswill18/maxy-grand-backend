@@ -1,5 +1,6 @@
 import Room from '../models/roomModel.js';
 import User from '../models/userModel.js';
+import Booking from '../models/bookingModel.js';
 // import nodemailer from 'nodemailer';
 
 // // Configure mail transporter
@@ -11,29 +12,142 @@ import User from '../models/userModel.js';
 //   },
 // });
 
+/**
+ * Helper function to find a booking by its ID and populate all
+ * related fields needed by the frontend.
+ */
+export const getPopulatedBooking = async (bookingId) => {
+  try {
+    const booking = await Booking.findById(bookingId)
+      .populate({
+        path: 'roomId',       // 1. Populate the Room
+        model: 'Room',
+        populate: {
+          path: 'roomTypeId', // 2. Nested populate for the RoomType (from the Room)
+          model: 'RoomType'
+        }
+      })
+      .populate('guestId');   // 3. Populate the User (if they're a system user)
+
+    return booking;
+
+  } catch (error) {
+    console.error("Error populating booking:", error);
+    return null; // Handle errors gracefully
+  }
+};
+
 // 🧾 Get all rooms and their statuses
 export const getAllRooms = async (req, res) => {
   try {
-    const rooms = await Room.find()
-      .populate('hotelId')
-      .populate('roomTypeId')
-      .populate('currentBookingId');
+    const { user } = req;
+
+    if (!user || !user.hotelId) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: User is not associated with any hotel.",
+      });
+    }
+
+    const rooms = await Room.find({ hotelId: user.hotelId })
+      .populate("hotelId")
+      .populate("roomTypeId")
+      .populate({
+        path: "currentBookingId",
+        model: "Booking",
+        populate: {
+          path: "guestId",
+          model: "User",
+        },
+      });
+
+    // 🔥 FIX: Restructure data so frontend gets exactly what it needs
+    const formattedRooms = rooms.map((room) => {
+      const booking = room.currentBookingId;
+      const guest = booking?.guestId;
+
+      return {
+        _id: room._id,
+        roomNumber: room.roomNumber,
+        status: room.status,
+        hotelId: room.hotelId,
+        roomTypeId: room.roomTypeId,
+
+        // ---- new fields for frontend mapping ----
+        bookedBy: guest
+          ? {
+              firstName: guest.firstName,
+              lastName: guest.lastName,
+              email: guest.email,
+              phoneNumber: guest.phoneNumber,
+            }
+          : null,
+
+        currentBookingId: booking
+          ? {
+              _id: booking._id,
+              guests: booking.guests,
+              specialRequests: booking.specialRequests,
+
+              // ADD THESE
+              guestName: booking.guestName,
+              guestEmail: booking.guestEmail,
+              guestPhone: booking.guestPhone,
+
+              // ADD populated user details
+              guestId: booking.guestId
+                ? {
+                    firstName: booking.guestId.firstName,
+                    lastName: booking.guestId.lastName,
+                    email: booking.guestId.email,
+                    phoneNumber: booking.guestId.phoneNumber,
+                  }
+                : null,
+            }
+          : null,
+
+
+        checkInDate: booking?.checkInDate || null,
+        checkOutDate: booking?.checkOutDate || null,
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      data: rooms,
+      data: formattedRooms,
     });
+
   } catch (error) {
-    console.error('Error fetching rooms:', error.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    console.error("Error fetching receptionist rooms:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Server error fetching rooms",
+    });
   }
 };
+
 
 // 🏨 Get only available rooms
 export const getAvailableRooms = async (req, res) => {
   try {
-    const rooms = await Room.find({ status: 'available' })
-      .populate('roomTypeId');
+    // 1. Get the logged-in user's hotelId.
+    // We assume the auth middleware adds a `user` object to `req`.
+    const { user } = req;
+
+    // 2. Check if the user is authenticated and has a hotelId
+    if (!user || !user.hotelId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: User is not associated with any hotel.',
+      });
+    }
+
+    // 3. Find rooms that are 'available' AND belong to the user's hotel.
+    const rooms = await Room.find({
+      status: 'available',
+      hotelId: user.hotelId,
+    }).populate('roomTypeId');
+
     res.status(200).json({ success: true, data: rooms });
   } catch (error) {
     console.error('Error fetching available rooms:', error.message);
@@ -44,34 +158,133 @@ export const getAvailableRooms = async (req, res) => {
 // 🕓 Check for rooms whose checkout time has arrived
 export const notifyCheckouts = async (req, res) => {
   try {
+    // 1. Get the logged-in user's hotelId
+    const { user } = req;
+
+    // 2. Check if the user is authenticated and has a hotelId
+    if (!user || !user.hotelId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: User is not associated with any hotel.',
+      });
+    }
+
     const now = new Date();
+
+    // 3. Find rooms due for checkout *only* at the user's hotel
     const roomsDue = await Room.find({
       checkOutDate: { $lte: now },
       status: 'occupied',
+      hotelId: user.hotelId, // Filter by the receptionist's hotel
     }).populate('bookedBy');
 
+    let notificationsSent = 0;
     for (const room of roomsDue) {
       if (room.bookedBy?.email) {
-        await transporter.sendMail({
-          from: process.env.SMTP_EMAIL,
-          to: room.bookedBy.email,
-          subject: `Checkout Notice for Room ${room.roomNumber}`,
-          html: `
-            <p>Hello ${room.bookedBy.fullName || 'Guest'},</p>
-            <p>Your checkout time for Room <b>${room.roomNumber}</b> has arrived.</p>
-            <p>Would you like to checkout now or extend your stay?</p>
-          `,
-        });
+        try {
+          await transporter.sendMail({
+            from: process.env.SMTP_EMAIL,
+            to: room.bookedBy.email,
+            subject: `Checkout Notice for Room ${room.roomNumber}`,
+            html: `
+              <p>Hello ${room.bookedBy.fullName || 'Guest'},</p>
+              <p>Your checkout time for Room <b>${room.roomNumber}</b> has arrived.</p>
+              <p>Please proceed to the front desk. If you'd like to extend your stay, please let us know.</p>
+            `,
+          });
+          notificationsSent++;
+        } catch (emailError) {
+          console.error(`Failed to send email for room ${room.roomNumber}:`, emailError.message);
+          // Continue to the next room even if one email fails
+        }
       }
     }
 
-    res.status(200).json({
+    // 4. Send a response
+    return res.status(200).json({
       success: true,
-      message: `${roomsDue.length} checkout notifications sent`,
+      message: `Checkout notification process complete. ${notificationsSent} notifications sent.`,
+      data: {
+        roomsChecked: roomsDue.length,
+        notificationsSent,
+      }
     });
+
   } catch (error) {
-    console.error('Error notifying checkouts:', error.message);
+    console.error('Error processing checkouts:', error.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
+export const getDashboardBookings = async (req, res) => {
+  try {
+    const { user } = req;
+
+    if (!user || !user.hotelId) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: User is not associated with any hotel.",
+      });
+    }
+
+    const { hotelId } = user;
+
+    // Get the start of today (00:00:00)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Get the end of today (technically 00:00:00 tomorrow)
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    // 1. Define the query
+    const query = {
+      hotelId: hotelId,
+      // $or: [
+      //   // 1. Anyone currently checked in
+      //   { bookingStatus: 'checked-in' },
+        
+      //   // 2. Anyone confirmed to check in today or in the future
+      //   { 
+      //     bookingStatus: 'confirmed',
+      //     checkInDate: { $gte: todayStart } 
+      //   },
+        
+      //   // 3. Anyone who checked out today
+      //   {
+      //     bookingStatus: 'checked-out',
+      //     checkOutDate: { $gte: todayStart, $lt: todayEnd }
+      //   }
+      // ]
+    };
+
+    // 2. Execute the query and populate all necessary details
+    const bookings = await Booking.find(query)
+      .populate({
+        path: 'roomId',
+        model: 'Room',
+        // Also populate the room's type to get capacity, etc.
+        populate: {
+          path: 'roomTypeId',
+          model: 'RoomType'
+        }
+      })
+      .populate('guestId') // Populates the User model (if it's an online booking)
+      .sort({ checkInDate: 1 }); // Sort by check-in date
+
+    // 3. Send the raw, populated bookings to the frontend
+    // The frontend store (Zustand) will be responsible for mapping this
+    return res.status(200).json({
+      success: true,
+      data: bookings,
+    });
+
+  } catch (error) {
+    console.error("Error fetching dashboard bookings:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Server error fetching bookings",
+    });
   }
 };
 
@@ -79,13 +292,34 @@ export const notifyCheckouts = async (req, res) => {
 export const requestCleaning = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const room = await Room.findByIdAndUpdate(
-      roomId,
-      { status: 'cleaning' },
-      { new: true }
+    
+    // 1. Get the logged-in user's hotelId
+    const { user } = req;
+
+    // 2. Check if the user is authenticated and has a hotelId
+    if (!user || !user.hotelId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: User is not associated with any hotel.',
+      });
+    }
+
+    // 3. Find a room that matches BOTH the roomId and the user's hotelId,
+    //    then update its status.
+    const room = await Room.findOneAndUpdate(
+      { _id: roomId, hotelId: user.hotelId }, // Query: Must match ID AND hotelId
+      { status: 'cleaning' },                  // Update
+      { new: true }                             // Options: Return the updated doc
     );
 
-    if (!room) return res.status(404).json({ success: false, error: 'Room not found' });
+    // If `room` is null, it means no room was found with that ID
+    // *at the user's hotel*.
+    if (!room) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Room not found at this hotel.' 
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -94,27 +328,219 @@ export const requestCleaning = async (req, res) => {
     });
   } catch (error) {
     console.error('Error requesting cleaning:', error.message);
+    // Handle potential CastErrors if the roomId is not a valid ObjectId format
+    if (error.name === 'CastError') {
+      return res.status(400).json({ success: false, error: 'Invalid Room ID format' });
+    }
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 };
 
 // 🔄 Update room status (available, occupied, etc.)
-export const updateRoomStatus = async (req, res) => {
+export const updateBookingStatusCheckIn = async (req, res) => {
   try {
-    const { roomId } = req.params;
-    const {status} = req.body;
+    const { bookingId } = req.params;
+    // --- 1. Get the confirmation code from the body ---
+    const { confirmationCode } = req.body;
 
-    const room = await Room.findByIdAndUpdate(roomId, { status }, { new: true });
+    if (!confirmationCode) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Confirmation code is required.' 
+      });
+    }
+
+    // 2. Find the booking
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    // --- 3. THIS IS THE NEW CHECK ---
+    if (booking.confirmationCode !== confirmationCode) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid confirmation code.' 
+      });
+    }
+    // --- END NEW CHECK ---
+
+    // 4. Find the associated room
+    const room = await Room.findById(booking.roomId);
+    if (!room) {
+      return res.status(404).json({ success: false, error: 'Room for this booking not found' });
+    }
+
+    // 5. Check for errors
+    if (booking.bookingStatus === 'checked-in') {
+      return res.status(400).json({ success: false, error: 'Guest is already checked in' });
+    }
+    if (room.status === 'occupied') {
+       return res.status(400).json({ success: false, error: `Room ${room.roomNumber} is already occupied` });
+    }
+
+    // 6. Update booking and room
+    booking.bookingStatus = 'checked-in';
+    room.status = 'occupied';
+    room.currentBookingId = booking._id; 
+
+    // 7. Save both to the database
+    await booking.save();
+    await room.save();
+
+    // 8. Send the updated, populated booking back
+    const populatedBooking = await getPopulatedBooking(booking._id); 
+    req.io.emit('bookingUpdated', populatedBooking);
+
+    return res.status(200).json({ success: true, data: populatedBooking });
+
+  } catch (error) {
+    console.error("Check-in error:", error);
+    return res.status(500).json({ success: false, error: 'Server error during check-in' });
+  }
+};
+
+export const checkOutGuest = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    // 1. Find the booking
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    // 2. Find the associated room
+    const room = await Room.findById(booking.roomId);
+    
+    // 3. Check for errors
+    if (booking.bookingStatus !== 'checked-in') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Guest is not currently checked in.' 
+      });
+    }
+
+    // 4. --- THIS IS THE CORRECT CHECK-OUT LOGIC ---
+    // Update booking
+    booking.bookingStatus = 'checked-out';
+    
+    // Update room (if found)
+    if (room) {
+      room.status = 'cleaning'; // Set room to cleaning
+      room.currentBookingId = null; // <-- Unlink the room from this booking
+      await room.save();
+    }
+    
+    // 5. Save the booking
+    await booking.save();
+
+    // 6. Send the updated, populated booking back to the frontend
+    const populatedBooking = await getPopulatedBooking(booking._id); // (Assumes you have this helper)
+
+    // Emit socket event
+    req.io.emit('bookingUpdated', populatedBooking);
+
+    return res.status(200).json({ 
+      success: true, 
+      message: 'Guest checked out successfully',
+      data: populatedBooking 
+    });
+
+  } catch (error) {
+    console.error("Check-out error:", error);
+    return res.status(500).json({ success: false, error: 'Server error during check-out' });
+  }
+};
+
+// 🛎 Book a guest into a room
+export const bookGuest = async (req, res) => {
+  try {
+    const { roomId, guestDetails, checkInDate, checkOutDate } = req.body;
+    // Create or find guest user
+    let guest = await User.findOne({ email: guestDetails.email });
+    if (!guest) {
+      guest = new User({
+        firstName: guestDetails.firstName,
+        lastName: guestDetails.lastName,
+        email: guestDetails.email,
+        phoneNumber: guestDetails.phoneNumber,
+        role: 'guest',
+        isActive: true,
+      });
+      await guest.save();
+    }
+    // Update room booking details
+    const room = await Room.findByIdAndUpdate(
+      roomId,
+      {
+        status: 'reserved',
+        bookedBy: guest._id,
+        checkInDate,
+        checkOutDate,
+      },
+      { new: true }
+    );
 
     if (!room) return res.status(404).json({ success: false, error: 'Room not found' });
 
     return res.status(200).json({
       success: true,
-      message: `Room ${room.roomNumber} status updated to ${status}`,
+      message: `Guest ${guest.firstName} ${guest.lastName} booked into room ${room.roomNumber}`,
       data: room,
     });
   } catch (error) {
-    console.error('Error updating room status:', error.message);
+    console.error('Error booking guest:', error.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
+export const findAvailableRoomsForRange = async (req, res) => {
+  try {
+    const { checkInDate, checkOutDate } = req.body;
+    const { user } = req; // Get receptionist's hotelId
+
+    if (!user || !user.hotelId) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
+    if (!checkInDate || !checkOutDate || new Date(checkOutDate) <= new Date(checkInDate)) {
+        return res.status(400).json({ success: false, error: 'Invalid date range provided.' });
+    }
+
+    // 1. Find all bookings that CONFLICT with the requested range
+    const conflictingBookings = await Booking.find({
+      hotelId: user.hotelId,
+      bookingStatus: { $in: ['confirmed', 'checked-in'] },
+      $and: [
+        { checkInDate: { $lt: new Date(checkOutDate) } },
+        { checkOutDate: { $gt: new Date(checkInDate) } },
+      ]
+    }).select('roomId'); // We only need the IDs of the booked rooms
+
+    // 2. Create a list of all room IDs that are booked
+    const bookedRoomIds = conflictingBookings.map(booking => booking.roomId);
+    
+    // 3. Find all rooms at the hotel that are NOT in the 'bookedRoomIds' list
+    //    AND are not out of service ('maintenance')
+    const availableRooms = await Room.find({
+      hotelId: user.hotelId,
+      _id: { $nin: bookedRoomIds }, // $nin means "not in"
+      status: { $nin: ['maintenance'] } // Exclude rooms under maintenance
+    })
+    .populate({
+        path: 'roomTypeId',
+        select: 'name price capacity amenities'
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: availableRooms.length,
+      data: availableRooms,
+    });
+
+  } catch (error) {
+    console.error('Error checking availability:', error.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 };

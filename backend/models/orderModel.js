@@ -23,15 +23,15 @@ const orderSchema = new mongoose.Schema({
   // --- Order Location / Type ---
   orderType: {
     type: String,
-    enum: ['room-service', 'pickup', 'table-service'],
+    enum: ['room service', 'pickup', 'table service'],
     required: true,
   },
-  // Required if orderType is 'room-service'
+  // Required if orderType is 'room service'
   roomNumber: {
     type: String,
     default: null,
   },
-  // Required if orderType is 'table-service'
+  // Required if orderType is 'table service'
   tableNumber: {
     type: String,
     default: null,
@@ -84,10 +84,10 @@ orderSchema.pre('save', function(next) {
   }
 
   // If anonymous, check based on order type
-  if (this.orderType === 'room-service' && !this.roomNumber) {
+  if (this.orderType === 'room service' && !this.roomNumber) {
     return next(new Error('Room number is required for anonymous room service orders.'));
   }
-  if (this.orderType === 'table-service' && !this.tableNumber) {
+  if (this.orderType === 'table service' && !this.tableNumber) {
     return next(new Error('Table number is required for table service orders.'));
   }
   if (this.orderType === 'pickup' && !this.customerName) {

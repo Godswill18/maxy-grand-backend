@@ -27,6 +27,8 @@ router.post('/track', trackOrdersByIds);
 // --- Staff/Admin Routes (Protected) ---
 // GET /api/orders/all          -> Get all orders for kitchen/bar
 router.get('/all-orders', protectedRoute, isStaffOrAdmin, getAllOrders);
+
+// router.get('/all-orders-ad', protectedRoute, isStaffOrAdmin, getAllOrders);
 // PATCH /api/orders/:id/status -> Update an order's status
 router.patch('/:id/status', protectedRoute, isStaffOrAdmin, updateOrderStatus);
 

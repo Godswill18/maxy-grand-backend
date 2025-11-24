@@ -43,7 +43,7 @@ const bookingSchema = new mongoose.Schema({
   },
   bookingType: {
     type: String,
-    enum: ['online', 'in-person'],
+    enum: ['online', 'walk-in'],
     required: true,
   },
   totalAmount: {
@@ -70,6 +70,19 @@ const bookingSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
+  guestDetails: {
+    address: { type: String },
+    city: { type: String },
+    state: { type: String },
+    arrivingFrom: { type: String }, // Where they traveled from
+    nextOfKinName: { type: String },
+    nextOfKinPhone: { type: String },
+  },
+  preferences: {
+    extraBedding: { type: Boolean, default: false },
+    specialRequests: { type: String } // You might already have this
+  },
+  // signature: { type: String }, // This will store a Base64 Image string
 }, { timestamps: true });
 
 const Booking = mongoose.model('Booking', bookingSchema);

@@ -9,39 +9,102 @@ import mongoose from 'mongoose';
  * @access  Private (Admin)
  */
 export const createRequest = async (req, res) => {
-  try {
-    const { amount, description, images } = req.body;
+    try {
+      // FIX: Added 'title' to destructuring to match frontend payload
+      const { title, amount, description, images } = req.body; 
 
-    // Get admin details from the auth middleware
-    const raisedById = req.user.id;
-    const hotelId = req.user.hotelId; 
+      // Get admin details from the auth middleware
+      const raisedById = req.user.id;
+      const hotelId = req.user.hotelId; 
 
-    // Basic validation
-    if (!amount || !description ) {
-      return res.status(400).json({ message: 'Please provide amount and description' });
+      // Basic validation
+      // FIX: Include title in required fields
+      if (!title || !amount || !description ) {
+        return res.status(400).json({ message: 'Please provide title, amount, and purpose/description' });
+      }
+
+      if (!hotelId) {
+          return res.status(400).json({ message: 'Admin user is not associated with any hotel.' });
+      }
+
+      const request = new Request({
+        hotelId,
+        raisedBy: raisedById,
+        title, // New field
+        amount,
+        description,
+        images,
+        status: 'pending',
+      });
+
+      const createdRequest = await request.save();
+
+      // FIX: Populate the returned object to ensure frontend types match
+      const populatedRequest = await createdRequest.populate([
+          { path: 'hotelId', select: 'name location' },
+          { path: 'raisedBy', select: 'firstName lastName email' }
+      ]);
+
+
+      res.status(201).json(populatedRequest);
+    } catch (error) {
+      res.status(500).json({ message: 'Server error creating request', error: error.message });
     }
+};
 
-    if (!hotelId) {
-        return res.status(400).json({ message: 'Admin user is not associated with any hotel.' });
+export const editRequest = async (req, res) => {
+    try {
+        const { title, description, amount } = req.body;
+        // The ID of the currently logged-in Admin, provided by the auth middleware
+        const loggedInAdminId = req.user.id; 
+        const { id: requestId } = req.params;
+
+        // 1. Validate request ID format
+        if (!mongoose.Types.ObjectId.isValid(requestId)) {
+            return res.status(400).json({ message: 'Invalid request ID' });
+        }
+
+        const request = await Request.findById(requestId);
+
+        // 2. Check if request exists
+        if (!request) {
+            return res.status(404).json({ message: 'Request not found' });
+        }
+
+        // --- ENFORCING EDIT RESTRICTIONS ---
+        
+        // 3. Check if the request is still pending
+        if (request.status !== 'pending') {
+            return res.status(403).json({ 
+                message: `Cannot edit request. Status is already ${request.status}.` 
+            });
+        }
+
+        // 4. Check if the logged-in user is the original creator ('raisedBy')
+        // Ensure both IDs are converted to strings for accurate comparison
+        if (request.raisedBy.toString() !== loggedInAdminId.toString()) {
+            return res.status(403).json({ 
+                message: 'Unauthorized. Only the original creator can edit this request.' 
+            });
+        }
+        
+        // --- PROCEED WITH UPDATE ---
+
+        // Update the request fields if they are provided in the body
+        if (title !== undefined) request.title = title;
+        if (description !== undefined) request.description = description;
+        // Use a standard check for amount, allowing 0 if needed, but checking for undefined
+        if (amount !== undefined) request.amount = amount; 
+        
+        const updatedRequest = await request.save();
+
+        res.status(200).json(updatedRequest);
+
+    } catch (error) {
+        // Log the error for debugging
+        console.error("Error in editRequest:", error.message);
+        res.status(500).json({ message: 'Server error updating request', error: error.message });
     }
-
-    const request = new Request({
-      hotelId,
-      raisedBy: raisedById,
-      amount,
-      description,
-      images,
-      status: 'pending', // Default, but good to be explicit
-    });
-
-    const createdRequest = await request.save();
-
-    // TODO: Implement logic to notify Superadmins (e.g., via email, websocket)
-
-    res.status(201).json(createdRequest);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error creating request', error: error.message });
-  }
 };
 
 /**
@@ -123,8 +186,9 @@ export const getHotelRequests = async (req, res) => {
     }
 
     const requests = await Request.find({ hotelId: hotelId })
-      .populate('raisedBy', 'name email')
-      .populate('approvedBy', 'name email')
+      .populate('raisedBy', 'firstName lastName email')
+      .populate('approvedBy', 'firstName lastName email')
+      .populate('hotelId', 'name location')
       .sort({ createdAt: -1 });
 
     res.status(200).json(requests);
@@ -150,6 +214,7 @@ export const getRequestById = async (req, res) => {
     const request = await Request.findById(requestId)
       .populate('hotelId', 'name location')
       .populate('raisedBy', 'name email')
+      .populate('title')
       .populate('approvedBy', 'name email');
 
     if (!request) {

@@ -29,7 +29,6 @@ export const createBooking = async (req, res) => {
   try {
     const user = req.user;
     const {
-      hotelId,
       roomId, 
       guestName,
       guestEmail,
@@ -39,7 +38,14 @@ export const createBooking = async (req, res) => {
       bookingType,
       totalAmount,
       amountPaid,
+      guestDetails,
+      preferences,
+      signature
     } = req.body;
+
+// const guestId = req.body.guestId || (bookingType === 'online' ? user._id : null);
+
+
 
     // 1️⃣ Validate input dates
     if (new Date(checkOutDate) <= new Date(checkInDate)) {
@@ -95,9 +101,9 @@ export const createBooking = async (req, res) => {
 
     // 6️⃣ Create booking record (using 'roomId')
     const booking = new Booking({
-      hotelId,
+      hotelId: req.body.hotelId || user.hotelId,
       roomId, // <-- FIX: Save 'roomId'
-      guestId,
+      guestId: guestId,
       guestName,
       guestEmail,
       guestPhone,
@@ -108,7 +114,10 @@ export const createBooking = async (req, res) => {
       amountPaid,
       paymentStatus,
       bookingStatus: 'confirmed',
-      confirmationCode: confirmationCode
+      confirmationCode: confirmationCode,
+      guestDetails,
+      preferences,
+      signature
     });
 
     const savedBooking = await booking.save();
@@ -156,7 +165,7 @@ export const getAllBookings = async (req, res) => {
 
     const bookings = await Booking.find()
       .populate('hotelId', 'name')
-      .populate('roomTypeId', 'roomNumber')
+      .populate('roomId', 'roomNumber')
       .populate('guestId', 'fullName email')
       .sort({ createdAt: -1 }); // Sort by newest first
 
@@ -187,48 +196,104 @@ export const getBookingById = async (req, res) => {
  * @desc Update booking status (Admin/Receptionist)
  * @route PATCH /api/bookings/:id/status
  */
+// export const updateBookingStatus = async (req, res) => {
+//   try {
+//     const { bookingStatus, paymentStatus, amountPaid } = req.body;
+//     const booking = await Booking.findById(req.params.id);
+
+//     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
+
+//     // Update values
+//     if (bookingStatus) booking.bookingStatus = bookingStatus;
+//     if (paymentStatus) booking.paymentStatus = paymentStatus;
+//     if (amountPaid !== undefined) booking.amountPaid = amountPaid;
+
+//     // Update room status
+//     const room = await Room.findById(booking.roomId); // <-- FIX: use roomId
+//     if (room) {
+//       if (bookingStatus === 'checked-out' || bookingStatus === 'cancelled') {
+//         room.status = 'cleaning'; // <-- Better than 'available'
+//         room.currentBookingId = null;
+//       }
+//       if (bookingStatus === 'checked-in') {
+//         room.status = 'occupied';
+//         room.currentBookingId = booking._id; // <-- SET current booking
+//       }
+//       if (bookingStatus === 'confirmed') {
+//         room.status = 'reserved'; // <-- FIX: 'confirmed' is 'reserved', not 'occupied'
+//       }
+//       await room.save();
+//     }
+
+//     const updatedBooking = await booking.save();
+//     const populatedBooking = await getPopulatedBooking(updatedBooking._id);
+//     req.io.emit('bookingUpdated', populatedBooking);
+
+//     return res.status(200).json({
+//       success: true,
+//       message: 'Booking status updated successfully',
+//       data: populatedBooking,
+//     });
+//   } catch (error) {
+//     console.error('Error updating booking:', error.message);
+//     return res.status(500).json({ success: false, error: 'Internal server error' });
+//   }
+// };
+
 export const updateBookingStatus = async (req, res) => {
-  try {
-    const { bookingStatus, paymentStatus, amountPaid } = req.body;
-    const booking = await Booking.findById(req.params.id);
+    try {
+        const { bookingStatus, paymentStatus, amountPaid, userId, guestDetails, preferences, confirmationCode } = req.body;
+        const booking = await Booking.findById(req.params.id);
 
-    if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
+        if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
 
-    // Update values
-    if (bookingStatus) booking.bookingStatus = bookingStatus;
-    if (paymentStatus) booking.paymentStatus = paymentStatus;
-    if (amountPaid !== undefined) booking.amountPaid = amountPaid;
+        // --- 1. Security Check (Required for Check-In) ---
+        if (bookingStatus === 'checked-in' && booking.confirmationCode !== confirmationCode) {
+            return res.status(400).json({ success: false, error: 'Invalid confirmation code.' });
+        }
 
-    // Update room status
-    const room = await Room.findById(booking.roomId); // <-- FIX: use roomId
-    if (room) {
-      if (bookingStatus === 'checked-out' || bookingStatus === 'cancelled') {
-        room.status = 'cleaning'; // <-- Better than 'available'
-        room.currentBookingId = null;
-      }
-      if (bookingStatus === 'checked-in') {
-        room.status = 'occupied';
-        room.currentBookingId = booking._id; // <-- SET current booking
-      }
-      if (bookingStatus === 'confirmed') {
-        room.status = 'reserved'; // <-- FIX: 'confirmed' is 'reserved', not 'occupied'
-      }
-      await room.save();
+        // --- 2. Update Booking Status and Financials ---
+        if (bookingStatus) booking.bookingStatus = bookingStatus;
+        if (paymentStatus) booking.paymentStatus = paymentStatus;
+        if (amountPaid !== undefined) booking.amountPaid = amountPaid;
+        
+        // --- 3. Save Detailed Guest Data on Check-In ---
+        if (bookingStatus === 'checked-in') {
+            booking.guestDetails = guestDetails; 
+            booking.preferences = preferences;
+            booking.guestId = userId; // Link to the confirmed or new User account
+        }
+
+        // --- 4. Update Room Status (as before) ---
+        const room = await Room.findById(booking.roomId); 
+        if (room) {
+            if (bookingStatus === 'checked-out' || bookingStatus === 'cancelled') {
+                room.status = 'cleaning';
+                room.currentBookingId = null;
+            }
+            if (bookingStatus === 'checked-in') {
+                room.status = 'occupied';
+                room.currentBookingId = booking._id; 
+            }
+            if (bookingStatus === 'confirmed') {
+                room.status = 'reserved';
+            }
+            await room.save();
+        }
+
+        const updatedBooking = await booking.save();
+        const populatedBooking = await getPopulatedBooking(updatedBooking._id);
+        req.io.emit('bookingUpdated', populatedBooking);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Booking status updated successfully',
+            data: populatedBooking,
+        });
+    } catch (error) {
+        console.error('Error updating booking:', error.message);
+        return res.status(500).json({ success: false, error: 'Internal server error' });
     }
-
-    const updatedBooking = await booking.save();
-    const populatedBooking = await getPopulatedBooking(updatedBooking._id);
-    req.io.emit('bookingUpdated', populatedBooking);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Booking status updated successfully',
-      data: populatedBooking,
-    });
-  } catch (error) {
-    console.error('Error updating booking:', error.message);
-    return res.status(500).json({ success: false, error: 'Internal server error' });
-  }
 };
 
 /**

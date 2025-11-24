@@ -119,7 +119,8 @@ export const login = async (req, res) => {
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
-      role: user.role
+      role: user.role,
+      hotelId: user.hotelId,
       // phoneNumber: user.phoneNumber,
     };
 
@@ -185,6 +186,40 @@ export const getAllStaff = async (req, res) => {
         res.status(500).json({ success: false, error: "Internal server error" });
     }
 }
+
+export const getAllStaffInHotel = async (req, res) => {
+    try {
+        // 1. Get hotelId from the logged-in user (req.user)
+        // This assumes your middleware (like 'protectRoute') attaches the user object to the request.
+        const loggedInUserHotelId = req.user.hotelId;
+
+        // Check if the logged-in user has an associated hotelId
+        if (!loggedInUserHotelId) {
+            // Depending on your application logic, you might return all staff or an error.
+            // For staff-specific endpoints, an error or empty list is usually appropriate.
+            return res.status(400).json({ 
+                success: false, 
+                message: "Logged-in user is not associated with a specific hotel." 
+            });
+        }
+
+        // Define staff roles to include
+        const staffRoles = ['receptionist', 'cleaner', 'waiter', 'admin'];
+
+        // 2. Query the database using the logged-in user's hotelId
+        const staffMembers = await User.find({ 
+            role: { $in: staffRoles }, 
+            hotelId: loggedInUserHotelId // Use the hotelId from req.user
+        }).select('-password');
+
+        res.status(200).json({ success: true, data: staffMembers });
+
+    } catch (error) {
+        console.error("Error in getAllStaffInHotel:", error.message);
+        // Be specific with the error message. The original console.error was misleading.
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
 
 export const getAllGuests = async (req, res) => {
   try {
@@ -266,43 +301,52 @@ export const updateStaffStatus = async (req, res) => {
 }
 
 export const updateStaffRole = async (req, res) => {
-  try {
-    const { id } = req.params; // staff ID
-    const { newRole } = req.body;
+    try {
+        const { id } = req.params; // staff ID
+        const { newRole } = req.body;
 
-    if (!newRole) {
-      return res.status(400).json({ success: false, message: "Role is required" });
+        if (!newRole) {
+            return res.status(400).json({ success: false, message: "Role is required" });
+        }
+
+        // Validate allowed roles
+        const validRoles = ['admin', 'receptionist', 'cleaner', 'waiter'];
+        if (!validRoles.includes(newRole)) {
+            return res.status(400).json({ success: false, message: "Invalid role provided" });
+        }
+
+        // 1. Check for Superadmin before update (must still fetch the user)
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: "Staff not found" });
+        }
+        if (user.role === 'superadmin') {
+            return res.status(403).json({ success: false, message: "Cannot modify superadmin role" });
+        }
+
+        // 2. FIX: Use findByIdAndUpdate to update ONLY the role field.
+        // The { new: true } option returns the updated document.
+        // This avoids re-validating the problematic 'hotelId' field.
+        const updatedUser = await User.findByIdAndUpdate(
+            id,
+            { role: newRole }, // Only update the role
+            { new: true, runValidators: true } // Return new doc, run validators ONLY on updated fields
+        ).select('-password'); // Exclude password from the returned object
+
+        if (!updatedUser) {
+             return res.status(404).json({ success: false, message: "Staff not found after update" });
+        }
+
+        // Emit update event to all connected clients
+        if (req.io) {
+            req.io.emit("staffUpdated", { action: "update", user: updatedUser });
+        }
+
+        res.status(200).json({ success: true, message: "Staff role updated successfully", data: updatedUser });
+    } catch (error) {
+        console.error("Error in updateStaffRole:", error.message);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
-
-    // Validate allowed roles
-    const validRoles = ['admin', 'receptionist', 'cleaner', 'waiter'];
-    if (!validRoles.includes(newRole)) {
-      return res.status(400).json({ success: false, message: "Invalid role provided" });
-    }
-
-    const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "Staff not found" });
-    }
-
-    // Prevent superadmin modification
-    if (user.role === 'superadmin') {
-      return res.status(403).json({ success: false, message: "Cannot modify superadmin role" });
-    }
-
-    user.role = newRole;
-    await user.save();
-
-    // Emit update event to all connected clients
-    if (req.io) {
-      req.io.emit("staffUpdated", { action: "update", user });
-    }
-
-    res.status(200).json({ success: true, message: "Staff role updated successfully", data: user });
-  } catch (error) {
-    console.error("Error in updateStaffRole:", error.message);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
 };
 
 
@@ -360,4 +404,86 @@ export const emitStaffStatusEvent = async (req, res) => {
     console.error('Error in emitStaffStatusEvent:', error.message);
     return res.status(500).json({ success: false, error: 'Internal server error' });
   }
+};
+
+/**
+ * @desc Find a user by email address
+ * @route GET /api/users/find-by-email?email=...
+ * @access Private (Protected Route)
+ */
+export const findUserByEmail = async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ success: false, error: "Email query parameter is required." });
+        }
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({ success: false, error: "User not found." });
+        }
+
+        // Return only necessary public fields (excluding password, roles, etc.)
+        return res.status(200).json({
+            success: true,
+            data: {
+                _id: user._id,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                email: user.email,
+                phoneNumber: user.phoneNumber || null,
+            },
+        });
+
+    } catch (error) {
+        console.error("Error finding user by email:", error);
+        return res.status(500).json({ success: false, error: "Server error during user lookup." });
+    }
+};
+
+/**
+ * @desc Create a new guest user account from the reception desk
+ * @route POST /api/users/create-guest-account
+ * @access Private (Protected Route)
+ */
+export const createGuestAccount = async (req, res) => {
+    try {
+        const { firstName, lastName, email, phoneNumber, password } = req.body;
+
+        if (!firstName || !lastName || !email || !password) {
+            return res.status(400).json({ success: false, error: "Required account fields missing." });
+        }
+
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(409).json({ success: false, error: "A user with this email already exists." });
+        }
+
+        // Create the user with 'guest' role
+        const newUser = new User({
+            firstName,
+            lastName,
+            email,
+            phoneNumber,
+            password, // Assumes password hashing is handled by a pre-save hook in your Mongoose model
+            role: 'guest',
+            isActive: true, // Auto-activate guest accounts
+            // hotelId is optional here, depending on your setup
+        });
+
+        const savedUser = await newUser.save();
+
+        // Return the essential ID for linking the booking
+        return res.status(201).json({
+            success: true,
+            message: "Guest account created successfully.",
+            userId: savedUser._id, 
+        });
+
+    } catch (error) {
+        console.error("Error creating guest account:", error);
+        return res.status(500).json({ success: false, error: "Server error during account creation." });
+    }
 };

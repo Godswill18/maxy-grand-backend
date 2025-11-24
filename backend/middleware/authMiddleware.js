@@ -46,16 +46,26 @@ export const adminMiddleware = (req, res, next) => {
 
 
 export const adminAndSuperAdminMiddleware = (req, res, next) => {
-  // This middleware assumes 'authMiddleware' has already run
-  // and attached the user to req.user.
-  const userRole = req.user.role;
-  if (userRole === 'admin' || userRole === 'superadmin') {
-    next(); // User is an admin, proceed
-  } else {
-    // 403 Forbidden: User is authenticated, but lacks permission
-    res.status(403).json({ message: 'Access denied. Admin role required.' });
-  }
+    const user = req.user;
+
+    if (!user) {
+        return res.status(401).json({
+            success: false,
+            error: "Unauthorized",
+        });
+    }
+
+    // Allow admin + superadmin
+    if (user.role === "admin" || user.role === "superadmin") {
+        return next();
+    }
+
+    return res.status(403).json({
+        success: false,
+        error: "Forbidden - Only Admins or SuperAdmins can access this",
+    });
 };
+
 
 /**
  * @desc    Superadmin Authorization Middleware

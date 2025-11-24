@@ -83,8 +83,12 @@ export const createOrder = async (req, res) => {
 // 🍳 GET All Orders (for Staff)
 export const getAllOrders = async (req, res) => {
   try {
-    // Find active orders (not delivered/cancelled) and sort by oldest first
+    // Get the hotelId from the authenticated user
+    const hotelId = req.user.hotelId; // Assumes authMiddleware attaches hotelId
+
+    // Find active orders for the specific hotel and sort by oldest first
     const orders = await Order.find({
+      hotelId: hotelId, // ⬅️ ADDED FILTER
       orderStatus: { $in: ['pending', 'confirmed', 'preparing', 'ready'] }
     })
     .populate('items.menuItemId', 'name')

@@ -146,12 +146,12 @@ export const getActiveHotelBranch = async (req, res) => {
 export const getHotelBranch_admin = async (req, res) => {
     try{
         // Ensure user is authenticated and attached to req.user
-        const user = req.user;
-        if (!user || user.role !== "superadmin") {
-          return res
-            .status(403)
-            .json({ success: false, error: "Forbidden — Super Admin access required" });
-        }
+        // const user = req.user;
+        // if (!user || user.role !== "superadmin") {
+        //   return res
+        //     .status(403)
+        //     .json({ success: false, error: "Forbidden — Super Admin access required" });
+        // }
         const hotelBranches = await Hotel.find();
         return res.status(200).json({
             success: true,

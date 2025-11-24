@@ -1,13 +1,13 @@
 import express from 'express';
 import { protectedRoute} from '../middleware/protectedRoutes.js';
 import { getActiveHotelBranch, getHotelBranch_admin , createHotelBranch, updateBranch, getSingleBranch, getSingleBranchUser, getHotelList, getMyBranch, deleteBranch} from '../controllers/hotelsController.js';
-import { adminMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js';
+import { adminAndSuperAdminMiddleware, adminMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.get('/getActive-branch', getActiveHotelBranch);
 
-router.get('/getHotel-branch-admin', protectedRoute, superAdminMiddleware ,getHotelBranch_admin);
+router.get('/getHotel-branch-admin', protectedRoute, adminAndSuperAdminMiddleware ,getHotelBranch_admin);
 
 router.post('/createHotel-branch', protectedRoute, superAdminMiddleware, createHotelBranch);
 

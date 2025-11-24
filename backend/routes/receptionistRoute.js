@@ -26,4 +26,6 @@ router.patch('/:bookingId/check-out', protectedRoute, checkOutGuest);
 router.post('/rooms/:roomId/clean', protectedRoute, requestCleaning);
 router.get('/dashboard/bookings', protectedRoute, receptionistMiddleware, getDashboardBookings);
 
+
+
 export default router;

@@ -108,6 +108,41 @@ export const createRoom = async (req, res) => {
   }
 };
 
+export const getRoomsByHotel = async (req, res) => {
+  try {
+    const { hotelId } = req.params;
+
+    const rooms = await RoomType.find({ hotelId })
+
+    res.json({ success: true, rooms });
+  } catch (error) {
+    console.error("Error fetching rooms by hotel:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error fetching rooms",
+    });
+  }
+};
+
+export const getRoomTypesByHotel = async (req, res) => {
+  try {
+    const { hotelId } = req.params;
+    const roomTypes = await RoomType.find({ hotelId })
+      .sort({ createdAt: -1 }); // Optional: sort by creation date
+    res.json({ 
+      success: true, 
+      data: roomTypes 
+    });
+  } catch (error) {
+    console.error("Error fetching room types by hotel:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error fetching room types",
+    });
+  }
+};
+
+
 
 // export const updateRoom = async (req, res) => {
 //   try {

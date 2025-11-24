@@ -10,9 +10,11 @@ import {
   deleteRoom,
   addRoomImages, // New
   deleteRoomImage, // New
+  getRoomsByHotel,
+  getRoomTypesByHotel
 } from '../controllers/roomsController.js';
 import roomsImages from '../config/roomsMulter.js';
-import { adminAndSuperAdminMiddleware } from '../middleware/authMiddleware.js';
+import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -65,5 +67,10 @@ router.patch(
   // NO MULTER HERE! This route just needs req.body
   deleteRoomImage
 );
+
+router.get('/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomsByHotel);
+
+router.get('/types/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomTypesByHotel);
+
 
 export default router;

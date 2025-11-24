@@ -6,6 +6,10 @@ const requestSchema = new mongoose.Schema({
         ref: 'Hotel',
         required: true,
     },
+    title:{
+        type: String,
+        required: true,
+    },
     raisedBy:{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

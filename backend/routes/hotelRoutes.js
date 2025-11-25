@@ -19,7 +19,7 @@ router.get('/get-single-branch-public/:id', getSingleBranchUser);
 
 router.get('/get-admin-branch/:id', protectedRoute, adminMiddleware, getMyBranch);
 
-router.get('/list', protectedRoute, superAdminMiddleware, getHotelList);
+router.get('/list', protectedRoute, adminAndSuperAdminMiddleware, getHotelList);
 
 router.delete('/delete-branch/:id', protectedRoute, superAdminMiddleware, deleteBranch);
 

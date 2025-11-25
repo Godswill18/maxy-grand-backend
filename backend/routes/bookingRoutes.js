@@ -8,8 +8,9 @@ import {
   deleteBooking,
   getUserBookings,
   checkoutRoom,
+  getHotelBookingSummary
 } from '../controllers/bookingController.js';
-import { isStaffOrAdmin } from '../middleware/authMiddleware.js';
+import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -32,5 +33,7 @@ router.delete('/:id', protectedRoute, deleteBooking);
 router.get('/user/:userId', protectedRoute, getUserBookings);
 
 router.put('/checkout/:roomId', checkoutRoom);
+
+router.get('/hotel-summary/:hotelId', protectedRoute, adminAndSuperAdminMiddleware, getHotelBookingSummary);
 
 export default router;

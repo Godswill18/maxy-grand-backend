@@ -296,6 +296,29 @@ export const updateBookingStatus = async (req, res) => {
     }
 };
 
+export const getHotelBookingSummary = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId;
+    const totalBookings = await Booking.countDocuments({ hotelId });
+    const confirmedBookings = await Booking.countDocuments({ hotelId, bookingStatus: 'confirmed' });
+    const checkedInBookings = await Booking.countDocuments({ hotelId, bookingStatus: 'checked-in' });
+    const checkedOutBookings = await Booking.countDocuments({ hotelId, bookingStatus: 'checked-out' });
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalBookings,
+        confirmedBookings,
+        checkedInBookings,
+        checkedOutBookings,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching booking summary:', error.message);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
+
 /**
  * @desc Delete booking (Admin/Receptionist)
  * @route DELETE /api/bookings/:id

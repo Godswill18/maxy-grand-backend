@@ -1,5 +1,5 @@
 import RoomType from "../models/roomTypeModel.js";
-import Room from "../models/roomModel.js"; // <-- 1. IMPORT THE ROOM MODEL
+import Room from "../models/roomModel.js"; 
 import fs from "fs";
 import path from "path";
 
@@ -127,12 +127,26 @@ export const getRoomsByHotel = async (req, res) => {
 export const getRoomTypesByHotel = async (req, res) => {
   try {
     const { hotelId } = req.params;
-    const roomTypes = await RoomType.find({ hotelId })
+    const roomTypes = await Room.find({ hotelId })
+      .populate('roomTypeId' , 'name description amenities price capacity images isAvailable')
+      .populate({
+        path: 'currentBookingId',
+        select: 'guestName checkOutDate' // Assume Booking has these fields
+      })
       .sort({ createdAt: -1 }); // Optional: sort by creation date
-    res.json({ 
-      success: true, 
-      data: roomTypes 
+    
+    // Map to add guestName and checkOut directly
+    const mappedRooms = roomTypes.map(room => ({
+      ...room.toObject(),
+      guestName: room.currentBookingId?.guestName || null,
+      checkOut: room.currentBookingId?.checkOutDate || null
+    }));
+
+    res.json({
+      success: true,
+      data: mappedRooms
     });
+    // console.log("Fetched room types:", roomTypes);
   } catch (error) {
     console.error("Error fetching room types by hotel:", error);
     res.status(500).json({
@@ -141,7 +155,6 @@ export const getRoomTypesByHotel = async (req, res) => {
     });
   }
 };
-
 
 
 // export const updateRoom = async (req, res) => {

@@ -1,26 +1,28 @@
 import express from 'express';
 import {
   createCleaningRequest,
-  getMyPendingTasks,
+  getMyTasks, // Renamed from getMyPendingTasks
+  startCleaningTask, // New
   completeCleaningTask,
   getHotelCleaningRequests,
   getCleaningRooms,
   getHotelCleaners,
-  getCleaningHistory
+  getCleaningHistory,
 } from '../controllers/cleaningController.js';
 import {
   adminMiddleware,
   cleanerMiddleware,
   isStaffOrAdmin,
   adminAndSuperAdminMiddleware,
-  superAdminMiddleware
+  superAdminMiddleware,
 } from '../middleware/authMiddleware.js';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
 
 const router = express.Router();
 
 // --- Cleaner Routes (for staff) ---
-router.get('/my-tasks', protectedRoute, cleanerMiddleware, getMyPendingTasks);
+router.get('/my-tasks', protectedRoute, cleanerMiddleware, getMyTasks);
+router.patch('/:id/start', protectedRoute, cleanerMiddleware, startCleaningTask); // New
 router.patch('/:id/complete', protectedRoute, cleanerMiddleware, completeCleaningTask);
 
 // --- Admin Routes (for management) ---

@@ -11,7 +11,10 @@ import {
   addRoomImages, // New
   deleteRoomImage, // New
   getRoomsByHotel,
-  getRoomTypesByHotel
+  getRoomTypesByHotel,
+   getMyHotelRooms, // NEW
+  updateRoomStatus, // NEW
+  getRoomStatusByHotel
 } from '../controllers/roomsController.js';
 import roomsImages from '../config/roomsMulter.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
@@ -68,9 +71,22 @@ router.patch(
   deleteRoomImage
 );
 
-router.get('/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomsByHotel);
+// router.get('/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomsByHotel);
 
 router.get('/types/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomTypesByHotel);
+
+router.get('/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomsByHotel);
+
+router.get('/room-status/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, getRoomStatusByHotel);
+
+// Get rooms for logged-in user's hotel (recommended)
+router.get('/my-hotel', protectedRoute, isStaffOrAdmin, getMyHotelRooms);
+
+// Update room status
+router.patch('/:id/status', protectedRoute, isStaffOrAdmin, updateRoomStatus);
+
+// Alternative route (if you prefer RESTful pattern)
+router.patch('/:id', protectedRoute, isStaffOrAdmin, updateRoomStatus);
 
 
 export default router;

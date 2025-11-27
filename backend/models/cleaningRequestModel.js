@@ -15,7 +15,7 @@ const cleaningRequestSchema = new mongoose.Schema(
     assignedCleaner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false, // Changed from required to optional for guest requests
     },
     requestedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -24,11 +24,10 @@ const cleaningRequestSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'in-progress', 'completed'], // Updated enums
+      enum: ['pending', 'in-progress', 'completed'],
       default: 'pending',
       required: true,
     },
-    // --- New Fields for Tracking ---
     startTime: {
       type: Date,
     },

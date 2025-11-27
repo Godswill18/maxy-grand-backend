@@ -157,6 +157,122 @@ export const getRoomTypesByHotel = async (req, res) => {
 };
 
 
+
+
+
+
+
+
+// Get all rooms for a specific hotel
+export const getRoomStatusByHotel = async (req, res) => {
+  try {
+    const { hotelId } = req.params;
+
+    // Fetch ROOMS (not RoomTypes) and populate the room type details
+    const rooms = await Room.find({ hotelId })
+      .populate('roomTypeId', 'name price capacity amenities') // Populate room type details
+      .sort({ roomNumber: 1 }); // Sort by room number
+
+    res.json({ 
+      success: true, 
+      rooms,
+      count: rooms.length 
+    });
+  } catch (error) {
+    console.error("Error fetching rooms by hotel:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error fetching rooms",
+      message: error.message
+    });
+  }
+};
+
+// Alternative: Get rooms by logged-in user's hotelId (recommended approach)
+export const getMyHotelRooms = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId; // Get from authenticated user
+
+    if (!hotelId) {
+      return res.status(400).json({
+        success: false,
+        error: "Hotel ID not found for user"
+      });
+    }
+
+    const rooms = await Room.find({ hotelId })
+      .populate('roomTypeId', 'name price capacity amenities')
+      .sort({ roomNumber: 1 });
+
+    res.json({ 
+      success: true, 
+      rooms,
+      count: rooms.length 
+    });
+  } catch (error) {
+    console.error("Error fetching rooms:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error fetching rooms",
+      message: error.message
+    });
+  }
+};
+
+// Update room status
+export const updateRoomStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const hotelId = req.user.hotelId;
+
+    // Validate status
+    const validStatuses = ['available', 'occupied', 'cleaning', 'maintenance', 'out-of-service'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid status value'
+      });
+    }
+
+    // Find room and verify it belongs to user's hotel
+    const room = await Room.findOne({ _id: id, hotelId });
+    
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        error: 'Room not found or access denied'
+      });
+    }
+
+    // Update the status
+    room.status = status;
+    
+    // If marking as available, update lastCleaned timestamp
+    if (status === 'available') {
+      room.lastCleaned = new Date();
+    }
+    
+    await room.save();
+
+    const updatedRoom = await Room.findById(id).populate('roomTypeId', 'name');
+
+    res.json({
+      success: true,
+      room: updatedRoom,
+      message: `Room ${room.roomNumber} status updated to ${status}`
+    });
+  } catch (error) {
+    console.error("Error updating room status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error updating room status",
+      message: error.message
+    });
+  }
+};
+
+
 // export const updateRoom = async (req, res) => {
 //   try {
 //     const roomId = req.params.id;

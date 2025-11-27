@@ -1,13 +1,16 @@
 import express from 'express';
 import {
   createCleaningRequest,
-  getMyTasks, // Renamed from getMyPendingTasks
-  startCleaningTask, // New
+  createGuestCleaningRequest, // NEW
+  getMyTasks,
+  startCleaningTask,
   completeCleaningTask,
   getHotelCleaningRequests,
   getCleaningRooms,
   getHotelCleaners,
   getCleaningHistory,
+  getUnassignedRequests, // NEW
+  acceptCleaningRequest, // NEW
 } from '../controllers/cleaningController.js';
 import {
   adminMiddleware,
@@ -15,14 +18,20 @@ import {
   isStaffOrAdmin,
   adminAndSuperAdminMiddleware,
   superAdminMiddleware,
+  // guestMiddleware, // You'll need to create this middleware
 } from '../middleware/authMiddleware.js';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
 
 const router = express.Router();
 
+// --- Guest Routes (for guests to request cleaning) ---
+router.post('/guest-request', protectedRoute, createGuestCleaningRequest);
+
 // --- Cleaner Routes (for staff) ---
 router.get('/my-tasks', protectedRoute, cleanerMiddleware, getMyTasks);
-router.patch('/:id/start', protectedRoute, cleanerMiddleware, startCleaningTask); // New
+router.get('/unassigned', protectedRoute, cleanerMiddleware, getUnassignedRequests); // NEW
+router.patch('/:id/accept', protectedRoute, cleanerMiddleware, acceptCleaningRequest); // NEW
+router.patch('/:id/start', protectedRoute, cleanerMiddleware, startCleaningTask);
 router.patch('/:id/complete', protectedRoute, cleanerMiddleware, completeCleaningTask);
 
 // --- Admin Routes (for management) ---

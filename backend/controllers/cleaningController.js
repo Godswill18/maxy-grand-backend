@@ -145,7 +145,142 @@ export const completeCleaningTask = async (req, res) => {
   }
 };
 
+export const createGuestCleaningRequest = async (req, res) => {
+  try {
+    const { roomId, notes, priority = 'Medium' } = req.body;
+    const requestedById = req.user.id;
+    const hotelId = req.user.hotelId;
+    const io = req.io;
 
+    if (!roomId) {
+      return res.status(400).json({ message: 'Room ID is required' });
+    }
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    // Check for existing pending request
+    const existingRequest = await CleaningRequest.findOne({
+      roomId,
+      status: { $in: ['pending', 'in-progress'] },
+      hotelId
+    });
+    
+    if (existingRequest) {
+      return res.status(400).json({
+        message: 'A cleaning request already exists for this room.'
+      });
+    }
+
+    // Create request WITHOUT assigning cleaner
+    const request = new CleaningRequest({
+      hotelId,
+      roomId,
+      requestedBy: requestedById,
+      notes,
+      priority,
+      estimatedDuration: '30 min',
+      status: 'pending',
+      // assignedCleaner will be null until a cleaner accepts
+    });
+
+    const createdRequest = await request.save();
+    await Room.findByIdAndUpdate(roomId, { status: 'cleaning' });
+    await emitUpdatedTasks(io, hotelId);
+    
+    res.status(201).json(createdRequest);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error creating request', error: error.message });
+  }
+};
+
+// Get all unassigned cleaning requests (for cleaners to see available tasks)
+export const getUnassignedRequests = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId;
+
+    const requests = await CleaningRequest.find({
+      hotelId,
+      status: 'pending',
+      assignedCleaner: null, // Only unassigned requests
+    })
+      .populate({
+        path: 'roomId',
+        select: 'roomNumber status',
+        populate: {
+          path: 'roomTypeId',
+          select: 'name'
+        }
+      })
+      .populate('requestedBy', 'firstName lastName')
+      .sort({ priority: -1, createdAt: 1 }); // High priority first, then oldest first
+
+    res.status(200).json(requests);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error fetching unassigned requests', error: error.message });
+  }
+};
+
+// Cleaner accepts (self-assigns) a cleaning request
+export const acceptCleaningRequest = async (req, res) => {
+  try {
+    const { id: requestId } = req.params;
+    const cleanerId = req.user.id;
+    const hotelId = req.user.hotelId;
+    const io = req.io;
+
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      return res.status(400).json({ message: 'Invalid request ID' });
+    }
+
+    const request = await CleaningRequest.findOne({ 
+      _id: requestId, 
+      hotelId 
+    });
+
+    if (!request) {
+      return res.status(404).json({ message: 'Cleaning request not found' });
+    }
+
+    if (request.assignedCleaner) {
+      return res.status(400).json({ message: 'This request has already been assigned to another cleaner' });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ message: 'This request is no longer available' });
+    }
+
+    // Assign the cleaner and start the task
+    request.assignedCleaner = cleanerId;
+    request.status = 'in-progress';
+    request.startTime = new Date();
+
+    const updatedRequest = await request.save();
+    await emitUpdatedTasks(io, hotelId);
+
+    // Populate the response
+    const populatedRequest = await CleaningRequest.findById(updatedRequest._id)
+      .populate({
+        path: 'roomId',
+        select: 'roomNumber status',
+        populate: {
+          path: 'roomTypeId',
+          select: 'name'
+        }
+      })
+      .populate('assignedCleaner', 'firstName lastName email')
+      .populate('requestedBy', 'firstName lastName');
+
+    res.status(200).json({ 
+      message: 'Request accepted and started', 
+      request: populatedRequest 
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error accepting request', error: error.message });
+  }
+};
 // export const getMyTasks = async (req, res) => { // Renamed and updated query
 //   try {
 //     const cleanerId = req.user.id;

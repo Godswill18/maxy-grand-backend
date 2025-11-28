@@ -5,9 +5,10 @@ import {
   getAllRequests,
   getHotelRequests,
   getRequestById,
-  editRequest
+  editRequest,
+  getAllRequestsInHotel
 } from '../controllers/requestController.js';
-import { adminMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js'; // Example middleware
+import { adminAndSuperAdminMiddleware, adminMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js'; // Example middleware
 import { protectedRoute } from '../middleware/protectedRoutes.js';
 
 const router = express.Router();
@@ -16,6 +17,7 @@ const router = express.Router();
 router.post("/create",protectedRoute, adminMiddleware, createRequest)    // Admin creates a request
 router.get("/", protectedRoute, adminMiddleware, getHotelRequests); // Admin gets their hotel's requests
 router.patch('/:id/edit-request', protectedRoute, adminMiddleware, editRequest); // Admin edits request status
+router.get('/get-hotel-requests', protectedRoute, adminAndSuperAdminMiddleware, getAllRequestsInHotel);
 
 // @access  Superadmin
 router.get('/all', protectedRoute, superAdminMiddleware, getAllRequests); // Superadmin gets all requests

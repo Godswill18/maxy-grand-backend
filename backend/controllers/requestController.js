@@ -232,3 +232,29 @@ export const getRequestById = async (req, res) => {
     res.status(500).json({ message: 'Server error fetching request', error: error.message });
   }
 };
+
+export const getAllRequestsInHotel = async (req, res) => {
+    try {
+        const loggedInUserHotelId = req.user.hotelId;
+
+        if (!loggedInUserHotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Logged-in user is not associated with a specific hotel." 
+            });
+        }
+
+        const requests = await Request.find({ 
+            hotelId: loggedInUserHotelId 
+        })
+        .populate('raisedBy', 'firstName lastName email')
+        .populate('approvedBy', 'firstName lastName')
+        .sort({ createdAt: -1 });
+
+        res.status(200).json({ success: true, data: requests });
+
+    } catch (error) {
+        console.error("Error in getAllRequestsInHotel:", error.message);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};

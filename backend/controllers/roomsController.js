@@ -157,9 +157,32 @@ export const getRoomTypesByHotel = async (req, res) => {
 };
 
 
+export const getAllRoomsInHotel = async (req, res) => {
+    try {
+        const loggedInUserHotelId = req.user.hotelId;
 
+        if (!loggedInUserHotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Logged-in user is not associated with a specific hotel." 
+            });
+        }
 
+        const rooms = await Room.find({ 
+            hotelId: loggedInUserHotelId 
+        })
+        .populate('roomTypeId', 'name pricePerNight')
+        .populate('currentGuest', 'firstName lastName email')
+        .populate('currentBookingId')
+        .sort({ roomNumber: 1 });
 
+        res.status(200).json({ success: true, data: rooms });
+
+    } catch (error) {
+        console.error("Error in getAllRoomsInHotel:", error.message);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
 
 
 

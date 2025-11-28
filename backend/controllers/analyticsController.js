@@ -1,8 +1,9 @@
-// analyticsController.js (NEW FUNCTION)
+// analyticsController.js
 import Booking from "../models/bookingModel.js"; 
 import Review from "../models/reviewModel.js";   
 import User from "../models/userModel.js";
-import { Types } from 'mongoose';                // For ObjectId casting
+import Room from "../models/roomModel.js";
+import { Types } from 'mongoose';
 
 /**
  * @desc Get aggregated analytics data for the hotel of the logged-in user
@@ -14,65 +15,178 @@ export const getBranchAnalytics = async (req, res) => {
         const hotelId = req.user.hotelId;
 
         if (!hotelId) {
-            return res.status(400).json({ success: false, message: "User is not associated with a hotel." });
+            return res.status(400).json({ 
+                success: false, 
+                message: "User is not associated with a hotel." 
+            });
         }
         
         const hotelObjectId = new Types.ObjectId(hotelId);
 
         // --- 1. Monthly Revenue & Bookings (Last 6 Months) ---
-        // This is a complex aggregation, simplified here for structure.
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
         const monthlyData = await Booking.aggregate([
-            { $match: { hotelId: hotelObjectId, status: { $in: ['completed', 'checked_out'] } } },
+            { 
+                $match: { 
+                    hotelId: hotelObjectId, 
+                    bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] },
+                    createdAt: { $gte: sixMonthsAgo }
+                } 
+            },
             { 
                 $group: {
-                    _id: { $month: "$checkInDate" }, // Group by month
-                    monthName: { $first: { $dateToString: { format: "%b", date: "$checkInDate" } } },
-                    totalRevenue: { $sum: "$totalPrice" },
+                    _id: { 
+                        year: { $year: "$createdAt" },
+                        month: { $month: "$createdAt" }
+                    },
+                    totalRevenue: { $sum: "$totalAmount" },
                     totalBookings: { $sum: 1 }
                 } 
             },
-            { $sort: { "_id": 1 } },
-            // In a real app, you'd calculate the percentage change here.
-            { $project: { _id: 0, month: "$monthName", revenue: "$totalRevenue", bookings: "$totalBookings" } }
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+            { 
+                $project: { 
+                    _id: 0,
+                    month: {
+                        $let: {
+                            vars: {
+                                monthsInString: ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                            },
+                            in: { $arrayElemAt: ["$$monthsInString", "$_id.month"] }
+                        }
+                    },
+                    revenue: "$totalRevenue",
+                    bookings: "$totalBookings"
+                } 
+            }
         ]);
+
+        // Fill in missing months with zero values
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const filledMonthlyData = [];
+        const now = new Date();
         
-        // --- 2. Revenue by Room Type (Hypothetical Aggregation) ---
+        for (let i = 5; i >= 0; i--) {
+            const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const monthName = monthNames[date.getMonth()];
+            
+            const existingData = monthlyData.find(d => d.month === monthName);
+            filledMonthlyData.push({
+                month: monthName,
+                revenue: existingData ? existingData.revenue : 0,
+                bookings: existingData ? existingData.bookings : 0
+            });
+        }
+        
+        // --- 2. Revenue by Room Type ---
         const roomTypeData = await Booking.aggregate([
-             { $match: { hotelId: hotelObjectId, status: { $in: ['completed', 'checked_out'] } } },
-             { $group: {
-                 _id: "$roomType", 
-                 totalRevenue: { $sum: "$totalPrice" }
-             }},
-             { $project: { _id: 0, type: "$_id", value: "$totalRevenue" }}
-             // NOTE: Front-end expects 'value' as a percentage, which must be calculated client-side 
-             // or using an extra $group stage in MongoDB. We return absolute values here.
+            { 
+                $match: { 
+                    hotelId: hotelObjectId, 
+                    bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] } 
+                } 
+            },
+            {
+                $lookup: {
+                    from: 'rooms',
+                    localField: 'roomId',
+                    foreignField: '_id',
+                    as: 'roomDetails'
+                }
+            },
+            { $unwind: '$roomDetails' },
+            {
+                $lookup: {
+                    from: 'roomtypes',
+                    localField: 'roomDetails.roomTypeId',
+                    foreignField: '_id',
+                    as: 'roomTypeDetails'
+                }
+            },
+            { $unwind: '$roomTypeDetails' },
+            { 
+                $group: {
+                    _id: "$roomTypeDetails.name",
+                    totalRevenue: { $sum: "$totalAmount" }
+                }
+            },
+            { 
+                $project: { 
+                    _id: 0, 
+                    type: "$_id", 
+                    value: "$totalRevenue" 
+                }
+            }
         ]);
 
         // --- 3. Customer Satisfaction (Reviews) ---
         const satisfactionData = await Review.aggregate([
-            { $match: { hotelId: hotelObjectId, rating: { $exists: true } } },
-            { $group: {
-                _id: "$rating", // Assuming rating is 1-5
-                count: { $sum: 1 }
-            }},
+            { $match: { hotelId: hotelObjectId } },
+            { 
+                $group: {
+                    _id: "$rating",
+                    count: { $sum: 1 }
+                }
+            },
             { $sort: { "_id": -1 } }
         ]);
 
-        // Quick Stats Calculation (Last Month)
-        const lastMonthData = monthlyData[monthlyData.length - 1] || { revenue: 0, bookings: 0 };
-        const totalStaff = (await User.countDocuments({ hotelId: hotelObjectId, role: { $in: ['admin', 'receptionist', 'cleaner', 'waiter'] } }));
+        // --- 4. Calculate Quick Stats ---
+        // Total revenue (all time)
+        const totalRevenueResult = await Booking.aggregate([
+            { 
+                $match: { 
+                    hotelId: hotelObjectId, 
+                    bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] } 
+                } 
+            },
+            { 
+                $group: {
+                    _id: null,
+                    totalRevenue: { $sum: "$totalAmount" }
+                }
+            }
+        ]);
+
+        // Total bookings
+        const totalBookings = await Booking.countDocuments({ 
+            hotelId: hotelObjectId,
+            bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] }
+        });
+
+        // Average occupancy (based on current state)
+        const totalRooms = await Room.countDocuments({ hotelId: hotelObjectId });
+        const occupiedRooms = await Room.countDocuments({ 
+            hotelId: hotelObjectId, 
+            status: 'occupied' 
+        });
+        const avgOccupancy = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+
+        // Average rating
+        const avgRatingResult = await Review.aggregate([
+            { $match: { hotelId: hotelObjectId } },
+            { 
+                $group: {
+                    _id: null,
+                    avgRating: { $avg: "$rating" }
+                }
+            }
+        ]);
+
+        const quickStats = {
+            totalRevenue: totalRevenueResult[0]?.totalRevenue || 0,
+            totalBookings: totalBookings,
+            avgOccupancy: avgOccupancy,
+            avgRating: avgRatingResult[0]?.avgRating ? Number(avgRatingResult[0].avgRating.toFixed(1)) : 0,
+        };
 
         res.status(200).json({
             success: true,
             data: {
-                quickStats: {
-                    totalRevenue: lastMonthData.revenue,
-                    totalBookings: lastMonthData.bookings,
-                    // These are mock calculations; a real app uses complex formulas
-                    avgOccupancy: 89, 
-                    avgRating: 4.6, 
-                },
-                monthlyRevenue: monthlyData,
+                quickStats,
+                monthlyRevenue: filledMonthlyData,
                 roomTypeRevenue: roomTypeData,
                 customerSatisfaction: satisfactionData,
             }
@@ -80,9 +194,10 @@ export const getBranchAnalytics = async (req, res) => {
 
     } catch (error) {
         console.error("Error in getBranchAnalytics:", error.message);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal server error",
+            error: error.message 
+        });
     }
 };
-
-// NOTE: You must also ensure this route is exposed in your Express router:
-// router.get('/branch-data', protectRoute, getBranchAnalytics);

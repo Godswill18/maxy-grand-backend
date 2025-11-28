@@ -449,41 +449,72 @@ export const findUserByEmail = async (req, res) => {
  * @access Private (Protected Route)
  */
 export const createGuestAccount = async (req, res) => {
-    try {
-        const { firstName, lastName, email, phoneNumber, password } = req.body;
+  try {
+    const { firstName, lastName, email, phoneNumber, password } = req.body;
+    const hotelId = req.user?.hotelId; // Get from authenticated receptionist
 
-        if (!firstName || !lastName || !email || !password) {
-            return res.status(400).json({ success: false, error: "Required account fields missing." });
-        }
-
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            return res.status(409).json({ success: false, error: "A user with this email already exists." });
-        }
-
-        // Create the user with 'guest' role
-        const newUser = new User({
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            password, // Assumes password hashing is handled by a pre-save hook in your Mongoose model
-            role: 'guest',
-            isActive: true, // Auto-activate guest accounts
-            // hotelId is optional here, depending on your setup
-        });
-
-        const savedUser = await newUser.save();
-
-        // Return the essential ID for linking the booking
-        return res.status(201).json({
-            success: true,
-            message: "Guest account created successfully.",
-            userId: savedUser._id, 
-        });
-
-    } catch (error) {
-        console.error("Error creating guest account:", error);
-        return res.status(500).json({ success: false, error: "Server error during account creation." });
+    // Validate required fields
+    if (!firstName || !lastName || !email || !phoneNumber || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'All fields are required: firstName, lastName, email, phoneNumber, password'
+      });
     }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { email: { $regex: new RegExp(`^${email}$`, 'i') } },
+        { phoneNumber }
+      ]
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'User with this email or phone number already exists',
+        userId: existingUser._id // Return existing user ID
+      });
+    }
+
+    // Hash password (assuming you have bcrypt installed)
+    const bcrypt = await import('bcryptjs');
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create new guest user
+    const newUser = new User({
+      firstName,
+      lastName,
+      email: email.toLowerCase(),
+      phoneNumber,
+      password: hashedPassword,
+      role: 'guest',
+      hotelId: hotelId || null, // Link to hotel if available
+      isActive: true // Guests are automatically active
+    });
+
+    await newUser.save();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Guest account created successfully',
+      userId: newUser._id,
+      data: {
+        _id: newUser._id,
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+        email: newUser.email,
+        phoneNumber: newUser.phoneNumber,
+        role: newUser.role
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating guest account:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Server error while creating guest account',
+      message: error.message
+    });
+  }
 };

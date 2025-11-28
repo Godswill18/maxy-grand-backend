@@ -11,6 +11,9 @@ import {
   getCleaningHistory,
   getUnassignedRequests, // NEW
   acceptCleaningRequest, // NEW
+  getCleanerPerformanceMetrics,
+  getCleanerDashboardOverview,
+  getAllCleaningRequestsInHotel
 } from '../controllers/cleaningController.js';
 import {
   adminMiddleware,
@@ -34,11 +37,16 @@ router.patch('/:id/accept', protectedRoute, cleanerMiddleware, acceptCleaningReq
 router.patch('/:id/start', protectedRoute, cleanerMiddleware, startCleaningTask);
 router.patch('/:id/complete', protectedRoute, cleanerMiddleware, completeCleaningTask);
 
+router.get('/performance/metrics', protectedRoute, cleanerMiddleware, getCleanerPerformanceMetrics);
+router.get('/dashboard/overview', protectedRoute, cleanerMiddleware, getCleanerDashboardOverview);
+
 // --- Admin Routes (for management) ---
 router.post('/', protectedRoute, adminAndSuperAdminMiddleware, createCleaningRequest);
 router.get('/hotel', protectedRoute, isStaffOrAdmin, getHotelCleaningRequests);
 router.get('/rooms/cleaning', protectedRoute, isStaffOrAdmin, getCleaningRooms);
 router.get('/cleaners', protectedRoute, isStaffOrAdmin, getHotelCleaners);
 router.get('/get-cleaning-history', protectedRoute, superAdminMiddleware, getCleaningHistory);
+
+router.get('/get-hotel-cleaning-requests', protectedRoute, adminAndSuperAdminMiddleware, getAllCleaningRequestsInHotel);
 
 export default router;

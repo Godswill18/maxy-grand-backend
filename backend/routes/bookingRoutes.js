@@ -7,12 +7,18 @@ import {
   updateBookingStatus,
   deleteBooking,
   getUserBookings,
-  checkoutRoom,
-  getHotelBookingSummary
+  // checkoutRoom,
+  verifyBookingConfirmationCode,
+  getHotelBookingSummary,
+  updateBooking,
+  cancelBooking,
+  getAllBookingsInHotel
 } from '../controllers/bookingController.js';
-import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
+import { adminAndSuperAdminMiddleware, isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+router.get('/get-hotel-bookings', protectedRoute, adminAndSuperAdminMiddleware, getAllBookingsInHotel);
 
 // Create booking (online or in-person)
 router.post('/create', protectedRoute, createBooking);
@@ -32,8 +38,15 @@ router.delete('/:id', protectedRoute, deleteBooking);
 // Get all bookings made by a user
 router.get('/user/:userId', protectedRoute, getUserBookings);
 
-router.put('/checkout/:roomId', checkoutRoom);
+// router.put('/checkout/:roomId', checkoutRoom);
 
 router.get('/hotel-summary/:hotelId', protectedRoute, adminAndSuperAdminMiddleware, getHotelBookingSummary);
+
+router.post('/verify-code/:bookingId', protectedRoute, receptionistMiddleware, verifyBookingConfirmationCode);
+
+router.put('/update/:id', protectedRoute, isStaffOrAdmin, updateBooking);           // Update booking details
+
+router.patch('/cancel/:id', protectedRoute, isStaffOrAdmin, cancelBooking);   // Cancel a booking
+
 
 export default router;

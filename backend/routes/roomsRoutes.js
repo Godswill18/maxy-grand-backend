@@ -14,7 +14,8 @@ import {
   getRoomTypesByHotel,
    getMyHotelRooms, // NEW
   updateRoomStatus, // NEW
-  getRoomStatusByHotel
+  getRoomStatusByHotel,
+  getAllRoomsInHotel
 } from '../controllers/roomsController.js';
 import roomsImages from '../config/roomsMulter.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
@@ -81,6 +82,8 @@ router.get('/room-status/by-hotel/:hotelId', protectedRoute, isStaffOrAdmin, get
 
 // Get rooms for logged-in user's hotel (recommended)
 router.get('/my-hotel', protectedRoute, isStaffOrAdmin, getMyHotelRooms);
+
+router.get('/get-hotel-rooms', protectedRoute, adminAndSuperAdminMiddleware, getAllRoomsInHotel);
 
 // Update room status
 router.patch('/:id/status', protectedRoute, isStaffOrAdmin, updateRoomStatus);

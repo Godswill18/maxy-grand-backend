@@ -17,6 +17,8 @@ export const isStaffOrAdmin = (req, res, next) => {
   // Check if the user's role is one of the allowed roles
   if (
     userRole === 'cleaner' ||
+    userRole === 'waiter' ||
+    userRole === 'headWaiter' ||
     userRole === 'receptionist' ||
     userRole === 'admin' ||
     userRole === 'superadmin'

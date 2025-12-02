@@ -31,6 +31,10 @@ const bookingSchema = new mongoose.Schema({
   guestPhone: {
     type: String,
   },
+  numberOfGuests: {
+    type: Number,
+    default: 0,
+  },
 
   // --- Booking & Payment Details ---
   checkInDate: {

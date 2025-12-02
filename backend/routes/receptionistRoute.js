@@ -13,13 +13,18 @@ import {
   extendGuestStay, // NEW
   getCheckoutAlerts, // NEW
   reassignRoom,
+  getDashboardStats,
+  getCheckInActivity,
+  getWeeklyRevenue,
+  getPendingCheckIns,
+  getExpectedCheckOuts
 } from '../controllers/receptionistController.js';
-import { receptionistMiddleware } from '../middleware/authMiddleware.js';
+import { isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // ===== ROOM MANAGEMENT =====
-router.get('/rooms', protectedRoute, receptionistMiddleware, getAllRooms);
+router.get('/rooms', protectedRoute, isStaffOrAdmin, getAllRooms);
 router.get('/rooms/available', protectedRoute, receptionistMiddleware, getAvailableRooms);
 router.post('/rooms/available-range', protectedRoute, receptionistMiddleware, findAvailableRoomsForRange);
 router.post('/rooms/:roomId/clean', protectedRoute, receptionistMiddleware, requestCleaning);
@@ -38,5 +43,11 @@ router.get('/checkout-alerts', protectedRoute, receptionistMiddleware, getChecko
 router.post('/rooms/notify-checkouts', protectedRoute, receptionistMiddleware, notifyCheckouts);
 
 router.post('/rooms/reassign', protectedRoute, receptionistMiddleware, reassignRoom);
+
+router.get('/dashboard-stats', protectedRoute, receptionistMiddleware, getDashboardStats);
+router.get('/checkin-activity', protectedRoute, receptionistMiddleware, getCheckInActivity);
+router.get('/weekly-revenue', protectedRoute, receptionistMiddleware, getWeeklyRevenue);
+router.get('/pending-checkins', protectedRoute, receptionistMiddleware, getPendingCheckIns);
+router.get('/expected-checkouts', protectedRoute, receptionistMiddleware, getExpectedCheckOuts);
 
 export default router;

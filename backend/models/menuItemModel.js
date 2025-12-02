@@ -39,6 +39,10 @@ const menuItemSchema = new mongoose.Schema({
   estimatedPrepTime: {
     type: Number, // in minutes
   },
+  isAvailable:{
+    type: Boolean,
+    default: true,
+  },
   tags: {
     type: [String], // e.g., "vegetarian", "spicy", "popular"
   }

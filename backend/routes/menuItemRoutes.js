@@ -63,7 +63,7 @@ router.patch(
 router.delete('/:id', protectedRoute, isStaffOrAdmin, deleteMenuItem);
 
 // GET /api/menu/all            -> Get ALL items (including out-of-stock)
-router.get('/all-item', protectedRoute, isStaffOrAdmin, getAllMenuItems);
+router.get('/all-items', protectedRoute, isStaffOrAdmin, getAllMenuItems);
 
 
 export default router;

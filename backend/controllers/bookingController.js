@@ -40,7 +40,7 @@ export const createBooking = async (req, res) => {
       amountPaid,
       guestDetails,
       preferences,
-      guests,
+      numberOfGuests,
       specialRequests,
       // signature
     } = req.body;
@@ -119,7 +119,7 @@ export const createBooking = async (req, res) => {
       confirmationCode: confirmationCode,
       guestDetails,
       preferences,
-      guests: guests || 1,
+      numberOfGuests: numberOfGuests,
       specialRequests,
       // signature
     });
@@ -196,10 +196,10 @@ export const getBookingById = async (req, res) => {
   }
 };
 
-/**
- * @desc Update booking details (Admin/Receptionist)
- * @route PUT /api/bookings/:id
- */
+// *
+//  * @desc Update booking details (Admin/Receptionist)
+//  * @route PUT /api/bookings/:id
+//  */
 export const updateBooking = async (req, res) => {
   try {
     const bookingId = req.params.id;
@@ -210,9 +210,14 @@ export const updateBooking = async (req, res) => {
       checkInDate,
       checkOutDate,
       roomId,
-      guests,
+      numberOfGuests,
+      // guests,
       totalAmount,
+      amountPaid,
+      paymentStatus,
       specialRequests,
+      guestDetails,
+      preferences,
     } = req.body;
 
     // 1️⃣ Find the existing booking
@@ -233,8 +238,8 @@ export const updateBooking = async (req, res) => {
 
     // 3️⃣ Check for room availability conflicts (if room or dates are changing)
     const isRoomChanging = roomId && roomId !== booking.roomId.toString();
-    const areDatesChanging = (checkInDate && checkInDate !== booking.checkInDate.toISOString()) || 
-                             (checkOutDate && checkOutDate !== booking.checkOutDate.toISOString());
+    const areDatesChanging = (checkInDate && checkInDate !== booking.checkInDate.toISOString().split('T')[0]) || 
+                             (checkOutDate && checkOutDate !== booking.checkOutDate.toISOString().split('T')[0]);
 
     if (isRoomChanging || areDatesChanging) {
       const targetRoomId = roomId || booking.roomId;
@@ -267,15 +272,54 @@ export const updateBooking = async (req, res) => {
     if (checkInDate) booking.checkInDate = new Date(checkInDate);
     if (checkOutDate) booking.checkOutDate = new Date(checkOutDate);
     if (roomId) booking.roomId = roomId;
-    if (guests !== undefined) booking.guests = guests;
+    
+    // Handle numberOfGuests (new field) or guests (old field)
+    if (numberOfGuests !== undefined) {
+      booking.numberOfGuests = numberOfGuests;
+    } 
+    
     if (totalAmount !== undefined) booking.totalAmount = totalAmount;
+    if (amountPaid !== undefined) booking.amountPaid = amountPaid;
+    if (paymentStatus) booking.paymentStatus = paymentStatus;
     if (specialRequests !== undefined) booking.specialRequests = specialRequests;
+    
+    // Handle guestDetails object
+    if (guestDetails) {
+      booking.guestDetails = {
+        address: guestDetails.address || booking.guestDetails?.address || '',
+        city: guestDetails.city || booking.guestDetails?.city || '',
+        state: guestDetails.state || booking.guestDetails?.state || '',
+        arrivingFrom: guestDetails.arrivingFrom || booking.guestDetails?.arrivingFrom || '',
+        nextOfKinName: guestDetails.nextOfKinName || booking.guestDetails?.nextOfKinName || '',
+        nextOfKinPhone: guestDetails.nextOfKinPhone || booking.guestDetails?.nextOfKinPhone || '',
+      };
+    }
+    
+    // Handle preferences object
+    if (preferences) {
+      booking.preferences = {
+        extraBedding: preferences.extraBedding !== undefined ? preferences.extraBedding : booking.preferences?.extraBedding || false,
+        specialRequests: preferences.specialRequests || booking.preferences?.specialRequests || '',
+      };
+    }
 
     // 5️⃣ Save updated booking
     const updatedBooking = await booking.save();
-    const populatedBooking = await getPopulatedBooking(updatedBooking._id);
+    
+    // 6️⃣ Populate the booking with related data
+    const populatedBooking = await Booking.findById(updatedBooking._id)
+      .populate('hotelId', 'name')
+      .populate({
+        path: 'roomId',
+        select: 'roomNumber status',
+        populate: {
+          path: 'roomTypeId',
+          select: 'name pricePerNight description capacity'
+        }
+      })
+      .populate('guestId', 'firstName lastName email');
 
-    // 6️⃣ Emit socket event
+    // 7️⃣ Emit socket event
     req.io.emit('bookingUpdated', populatedBooking);
 
     return res.status(200).json({
@@ -285,7 +329,11 @@ export const updateBooking = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating booking:', error.message);
-    return res.status(500).json({ success: false, error: 'Internal server error' });
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 };
 
@@ -588,4 +636,106 @@ export const getAllBookingsInHotel = async (req, res) => {
         console.error("Error in getAllBookingsInHotel:", error.message);
         res.status(500).json({ success: false, error: "Internal server error" });
     }
+};
+
+
+/**
+ * @desc Get available rooms for a date range
+ * @route GET /api/rooms/available?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD
+ * @access Public (or Protected based on your needs)
+ */
+export const getAvailableRooms = async (req, res) => {
+  try {
+    const { checkIn, checkOut } = req.query;
+    const hotelId = req.user?.hotelId; // Get from authenticated user
+
+    // Validate inputs
+    if (!checkIn || !checkOut) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-in and check-out dates are required' 
+      });
+    }
+
+    if (!hotelId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User is not associated with a hotel' 
+      });
+    }
+
+    // Validate dates
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    
+    if (checkOutDate <= checkInDate) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-out date must be after check-in date' 
+      });
+    }
+
+    // 1. Find all rooms in this hotel
+    const allRooms = await Room.find({ 
+      hotelId: hotelId,
+      status: { $in: ['available', 'reserved'] } // Include reserved rooms (they might be available for these dates)
+    })
+    .populate('roomTypeId', 'name pricePerNight description capacity')
+    .sort({ roomNumber: 1 });
+
+    if (allRooms.length === 0) {
+      return res.status(200).json({ 
+        success: true, 
+        data: [],
+        message: 'No rooms found in this hotel'
+      });
+    }
+
+    // 2. Find all conflicting bookings for these dates
+    const conflictingBookings = await Booking.find({
+      hotelId: hotelId,
+      bookingStatus: { $in: ['confirmed', 'checked-in'] }, // Only check active bookings
+      $and: [
+        { checkInDate: { $lt: checkOutDate } },
+        { checkOutDate: { $gt: checkInDate } }
+      ]
+    }).select('roomId');
+
+    // 3. Get array of room IDs that are booked
+    const bookedRoomIds = conflictingBookings.map(booking => booking.roomId.toString());
+
+    // 4. Filter out booked rooms
+    const availableRooms = allRooms.filter(room => 
+      !bookedRoomIds.includes(room._id.toString())
+    );
+
+    // 5. Format response
+    const formattedRooms = availableRooms.map(room => ({
+      _id: room._id,
+      roomNumber: room.roomNumber,
+      status: room.status,
+      floor: room.floor,
+      roomTypeId: {
+        _id: room.roomTypeId._id,
+        name: room.roomTypeId.name,
+        pricePerNight: room.roomTypeId.pricePerNight,
+        description: room.roomTypeId.description,
+        capacity: room.roomTypeId.capacity
+      }
+    }));
+
+    return res.status(200).json({ 
+      success: true, 
+      data: formattedRooms,
+      message: `${formattedRooms.length} room(s) available for selected dates`
+    });
+
+  } catch (error) {
+    console.error('Error fetching available rooms:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
 };

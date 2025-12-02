@@ -1,6 +1,6 @@
 import Order from '../models/orderModel.js';
 import MenuItem from '../models/menuItemModel.js';
-import User from '../models/userModel.js'; // Assume User model exists with role 'waiter'
+import User from '../models/userModel.js';
 import mongoose from 'mongoose';
 
 // 🛒 CREATE Order (unchanged, but emit socket)
@@ -8,20 +8,23 @@ export const createOrder = async (req, res) => {
   try {
     const {
       hotelId,
-      orderType,   // 'room-service', 'pickup', 'table-service'
+      orderType,
       roomNumber,
       tableNumber,
       customerName,
-      items,         // Array of { menuItemId: "...", quantity: 2 }
+      items,
       specialInstructions,
-      waiterId, // New: Optional waiter assignment
+      waiterId,
     } = req.body;
     const guestId = req.user ? req.user._id : null;
+    
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, error: "Order cart is empty" });
     }
+    
     let totalAmount = 0;
     const processedItems = [];
+    
     for (const item of items) {
       const menuItem = await MenuItem.findById(item.menuItemId);
       if (!menuItem) {
@@ -39,6 +42,7 @@ export const createOrder = async (req, res) => {
         price: itemPrice,
       });
     }
+    
     const newOrder = new Order({
       hotelId,
       guestId,
@@ -49,10 +53,11 @@ export const createOrder = async (req, res) => {
       items: processedItems,
       totalAmount,
       specialInstructions,
-      waiterId, // New field
-      orderStatus: 'pending',    // Default status
-      paymentStatus: 'pending', // Default status
+      waiterId,
+      orderStatus: 'pending',
+      paymentStatus: 'pending',
     });
+    
     const savedOrder = await newOrder.save();
     
     // Emit socket event
@@ -69,17 +74,18 @@ export const createOrder = async (req, res) => {
   }
 };
 
-// 🍳 GET All Orders (for Staff) - unchanged
+// 🍳 GET All Orders (for Staff) - Updated to include all statuses
 export const getAllOrders = async (req, res) => {
   try {
     const hotelId = req.user.hotelId;
+    // Get all orders (not just active ones) to support order history
     const orders = await Order.find({
-      hotelId: hotelId,
-      orderStatus: { $in: ['pending', 'confirmed', 'preparing', 'ready'] }
+      hotelId: hotelId
     })
     .populate('items.menuItemId', 'name')
-    .populate('waiterId', 'name') // New populate
-    .sort({ createdAt: 'asc' });
+    .populate('waiterId', 'firstName lastName email') // ✅ Populate firstName and lastName
+    .sort({ createdAt: 'desc' }); // Most recent first
+    
     return res.status(200).json({ success: true, data: orders });
   } catch (error) {
     console.error("Error in getAllOrders:", error.message);
@@ -87,11 +93,13 @@ export const getAllOrders = async (req, res) => {
   }
 };
 
-// 🏃 GET My Orders (unchanged)
+// 🏃 GET My Orders
 export const getMyOrders = async (req, res) => {
   try {
     const orders = await Order.find({ guestId: req.user._id })
-      .sort({ createdAt: 'desc' }).populate('waiterId', 'name');
+      .sort({ createdAt: 'desc' })
+      .populate('waiterId', 'firstName lastName email'); // ✅ Populate firstName and lastName
+    
     return res.status(200).json({ success: true, data: orders });
   } catch (error) {
     console.error("Error in getMyOrders:", error.message);
@@ -99,14 +107,17 @@ export const getMyOrders = async (req, res) => {
   }
 };
 
-// 📊 GET Order Status (unchanged)
+// 📊 GET Order Status
 export const getOrderStatus = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-      .select('orderStatus items totalAmount createdAt').populate('waiterId', 'name');
+      .select('orderStatus items totalAmount createdAt paymentStatus')
+      .populate('waiterId', 'firstName lastName email'); // ✅ Populate firstName and lastName
+    
     if (!order) {
       return res.status(404).json({ success: false, error: "Order not found" });
     }
+    
     return res.status(200).json({ success: true, data: order });
   } catch (error) {
     console.error("Error in getOrderStatus:", error.message);
@@ -118,18 +129,24 @@ export const getOrderStatus = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
+    
     if (!['confirmed', 'preparing', 'ready', 'delivered', 'cancelled'].includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid status" });
     }
+    
     const updatedOrder = await Order.findByIdAndUpdate(
       req.params.id,
       { orderStatus: status },
       { new: true }
-    ).populate('waiterId', 'name');
+    ).populate('waiterId', 'firstName lastName email'); // ✅ Populate firstName and lastName
+    
     if (!updatedOrder) {
       return res.status(404).json({ success: false, error: "Order not found" });
     }
+    
+    // Emit socket event
     req.io?.emit('orderUpdated', updatedOrder);
+    
     return res.status(200).json({
       success: true,
       message: `Order status updated to ${status}`,
@@ -141,10 +158,55 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// New: GET Admin Orders with pagination, filters, sorting
+// 💳 UPDATE Payment Status (NEW)
+export const updatePaymentStatus = async (req, res) => {
+  try {
+    const { paymentStatus } = req.body;
+    
+    if (!['pending', 'paid', 'refunded'].includes(paymentStatus)) {
+      return res.status(400).json({ success: false, error: "Invalid payment status" });
+    }
+    
+    const updatedOrder = await Order.findByIdAndUpdate(
+      req.params.id,
+      { paymentStatus },
+      { new: true }
+    ).populate('waiterId', 'firstName lastName email'); // ✅ Populate firstName and lastName
+    
+    if (!updatedOrder) {
+      return res.status(404).json({ success: false, error: "Order not found" });
+    }
+    
+    // Emit socket event
+    req.io?.emit('orderUpdated', updatedOrder);
+    
+    return res.status(200).json({
+      success: true,
+      message: `Payment status updated to ${paymentStatus}`,
+      data: updatedOrder
+    });
+  } catch (error) {
+    console.error("Error in updatePaymentStatus:", error.message);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+// GET Admin Orders with pagination, filters, sorting
 export const getAdminOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 20, sortBy = 'createdAt', sortDir = 'desc', status, fromDate, toDate, amount, hotelId } = req.query;
+    const { 
+      page = 1, 
+      limit = 20, 
+      sortBy = 'createdAt', 
+      sortDir = 'desc', 
+      status, 
+      fromDate, 
+      toDate, 
+      amount, 
+      hotelId,
+      paymentStatus 
+    } = req.query;
+    
     const skip = (Number(page) - 1) * Number(limit);
     const query = {};
     const user = req.user;
@@ -154,26 +216,29 @@ export const getAdminOrders = async (req, res) => {
       query.hotelId = user.hotelId;
     } else if (user.role === 'superAdmin' && hotelId) {
       query.hotelId = hotelId;
-    } // Else superadmin gets all
+    }
 
     // Status filter
     if (status) query.orderStatus = status;
 
-    // Date range filter (on createdAt)
+    // Payment status filter
+    if (paymentStatus) query.paymentStatus = paymentStatus;
+
+    // Date range filter
     if (fromDate || toDate) {
       query.createdAt = {};
       if (fromDate) query.createdAt.$gte = new Date(fromDate);
       if (toDate) query.createdAt.$lte = new Date(toDate);
     }
 
-    // Amount search (exact or range? Here as >= for simplicity)
+    // Amount search
     if (amount) {
       query.totalAmount = { $gte: Number(amount) };
     }
 
     const orders = await Order.find(query)
       .populate('items.menuItemId', 'name')
-      .populate('waiterId', 'name')
+      .populate('waiterId', 'firstName lastName email') // ✅ Populate firstName and lastName
       .sort({ [sortBy]: sortDir === 'desc' ? -1 : 1 })
       .skip(skip)
       .limit(Number(limit));
@@ -183,7 +248,12 @@ export const getAdminOrders = async (req, res) => {
     return res.status(200).json({ 
       success: true, 
       data: orders, 
-      pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } 
+      pagination: { 
+        page: Number(page), 
+        limit: Number(limit), 
+        total, 
+        pages: Math.ceil(total / Number(limit)) 
+      } 
     });
   } catch (error) {
     console.error("Error in getAdminOrders:", error.message);
@@ -191,17 +261,18 @@ export const getAdminOrders = async (req, res) => {
   }
 };
 
-// New: GET Order Summary
+// GET Order Summary
 export const getOrderSummary = async (req, res) => {
   try {
     const user = req.user;
-    const query = { hotelId: user.hotelId }; // Admin default
+    const query = { hotelId: user.hotelId };
+    
     if (user.role === 'superAdmin') {
       const { hotelId } = req.query;
       if (hotelId) query.hotelId = hotelId;
     }
 
-    const now = new Date('2025-11-24'); // Current date provided
+    const now = new Date();
     const startOfDay = new Date(now.setHours(0, 0, 0, 0));
     const endOfDay = new Date(now.setHours(23, 59, 59, 999));
     const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
@@ -213,9 +284,19 @@ export const getOrderSummary = async (req, res) => {
     endOfMonth.setHours(23, 59, 59, 999);
 
     const [dailyCompleted, weeklyOrders, monthlyOrders] = await Promise.all([
-      Order.countDocuments({ ...query, orderStatus: 'delivered', createdAt: { $gte: startOfDay, $lte: endOfDay } }),
-      Order.countDocuments({ ...query, createdAt: { $gte: startOfWeek, $lte: endOfWeek } }),
-      Order.countDocuments({ ...query, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
+      Order.countDocuments({ 
+        ...query, 
+        orderStatus: 'delivered', 
+        createdAt: { $gte: startOfDay, $lte: endOfDay } 
+      }),
+      Order.countDocuments({ 
+        ...query, 
+        createdAt: { $gte: startOfWeek, $lte: endOfWeek } 
+      }),
+      Order.countDocuments({ 
+        ...query, 
+        createdAt: { $gte: startOfMonth, $lte: endOfMonth } 
+      }),
     ]);
 
     return res.status(200).json({ 
@@ -228,19 +309,25 @@ export const getOrderSummary = async (req, res) => {
   }
 };
 
+// Track Orders by IDs
 export const trackOrdersByIds = async (req, res) => {
   try {
     const { orderIds } = req.body;
+    
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
       return res.status(400).json({ success: false, error: "An array of orderIds is required" });
     }
+    
     const orders = await Order.find({
       _id: { $in: orderIds }
     })
-    .sort({ createdAt: 'desc' }).populate('waiterId', 'name');
+    .sort({ createdAt: 'desc' })
+    .populate('waiterId', 'firstName lastName email'); // ✅ Populate firstName and lastName
+    
     const safeOrders = orders.map(order => ({
       _id: order._id,
       orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
       items: order.items,
       totalAmount: order.totalAmount,
       createdAt: order.createdAt,
@@ -250,9 +337,79 @@ export const trackOrdersByIds = async (req, res) => {
       customerName: order.customerName,
       waiterId: order.waiterId,
     }));
+    
     return res.status(200).json({ success: true, data: safeOrders });
   } catch (error) {
     console.error("Error in trackOrdersByIds:", error.message);
     return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+export const getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    // Validate order ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Invalid order ID" 
+      });
+    }
+
+    // Find order
+    const order = await Order.findById(id)
+      .populate('waiterId', 'firstName lastName email')
+      .populate('items.menuItemId', 'name');
+
+    if (!order) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Order not found" 
+      });
+    }
+
+    // Check access permissions
+    // HeadWaiters, Admins, and SuperAdmins can see all orders in their hotel
+    // if (['headWaiter', 'admin', 'superAdmin'].includes(user.role)) {
+    //   if (order.hotelId.toString() !== user.hotelId.toString()) {
+    //     return res.status(403).json({ 
+    //       success: false, 
+    //       error: "Access denied" 
+    //     });
+    //   }
+    // } 
+    // // Regular waiters can only see their own orders
+    // else if (user.role === 'waiter') {
+    //   const orderWaiterId = order.waiterId?._id || order.waiterId;
+    //   if (orderWaiterId.toString() !== user._id.toString() || 
+    //       order.hotelId.toString() !== user.hotelId.toString()) {
+    //     return res.status(403).json({ 
+    //       success: false, 
+    //       error: "Access denied" 
+    //     });
+    //   }
+    // }
+    // Guests can only see their own orders
+    // else if (user.role === 'guest') {
+    //   if (order.guestId?.toString() !== user._id.toString()) {
+    //     return res.status(403).json({ 
+    //       success: false, 
+    //       error: "Access denied" 
+    //     });
+    //   }
+    // }
+
+    return res.status(200).json({ 
+      success: true, 
+      data: order 
+    });
+  } catch (error) {
+    console.error("Error in getOrderById:", error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: "Internal server error" 
+    });
   }
 };

@@ -1,6 +1,7 @@
 import Room from '../models/roomModel.js';
 import User from '../models/userModel.js';
 import Booking from '../models/bookingModel.js';
+import { Types } from 'mongoose';
 // import nodemailer from 'nodemailer';
 
 // // Configure mail transporter
@@ -950,4 +951,390 @@ export const reassignRoom = async (req, res) => {
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
+};
+
+export const getDashboardStats = async (req, res) => {
+    try {
+        const hotelId = req.user.hotelId;
+
+        if (!hotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "User is not associated with a hotel." 
+            });
+        }
+
+        const hotelObjectId = new Types.ObjectId(hotelId);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        // --- Today's Check-ins ---
+        const todayCheckInsTotal = await Booking.countDocuments({
+            hotelId: hotelObjectId,
+            checkInDate: { $gte: today, $lt: tomorrow }
+        });
+
+        const todayCheckInsCompleted = await Booking.countDocuments({
+            hotelId: hotelObjectId,
+            checkInDate: { $gte: today, $lt: tomorrow },
+            bookingStatus: 'checked-in'
+        });
+
+        const todayCheckInsPending = todayCheckInsTotal - todayCheckInsCompleted;
+
+        // --- Today's Check-outs ---
+        const todayCheckOutsTotal = await Booking.countDocuments({
+            hotelId: hotelObjectId,
+            checkOutDate: { $gte: today, $lt: tomorrow }
+        });
+
+        const todayCheckOutsCompleted = await Booking.countDocuments({
+            hotelId: hotelObjectId,
+            checkOutDate: { $gte: today, $lt: tomorrow },
+            bookingStatus: 'checked-out'
+        });
+
+        const todayCheckOutsPending = todayCheckOutsTotal - todayCheckOutsCompleted;
+
+        // --- Occupied Rooms ---
+        const totalRooms = await Room.countDocuments({ hotelId: hotelObjectId });
+        const occupiedRooms = await Room.countDocuments({ 
+            hotelId: hotelObjectId, 
+            status: 'occupied' 
+        });
+        const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+
+        // --- Today's Revenue ---
+        const todayRevenueResult = await Booking.aggregate([
+            {
+                $match: {
+                    hotelId: hotelObjectId,
+                    createdAt: { $gte: today, $lt: tomorrow },
+                    bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: "$totalAmount" }
+                }
+            }
+        ]);
+
+        const yesterdayRevenueResult = await Booking.aggregate([
+            {
+                $match: {
+                    hotelId: hotelObjectId,
+                    createdAt: { $gte: yesterday, $lt: today },
+                    bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: "$totalAmount" }
+                }
+            }
+        ]);
+
+        const todayRevenue = todayRevenueResult[0]?.total || 0;
+        const yesterdayRevenue = yesterdayRevenueResult[0]?.total || 1;
+        const revenueChange = yesterdayRevenue > 0 
+            ? ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100 
+            : 0;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                todayCheckIns: {
+                    total: todayCheckInsTotal,
+                    completed: todayCheckInsCompleted,
+                    pending: todayCheckInsPending
+                },
+                todayCheckOuts: {
+                    total: todayCheckOutsTotal,
+                    completed: todayCheckOutsCompleted,
+                    pending: todayCheckOutsPending
+                },
+                occupiedRooms: {
+                    occupied: occupiedRooms,
+                    total: totalRooms,
+                    occupancyRate: occupancyRate
+                },
+                todayRevenue: {
+                    amount: todayRevenue,
+                    percentageChange: Math.round(revenueChange)
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Error in getDashboardStats:", error.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal server error",
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * @desc Get hourly check-in/check-out activity for today
+ * @route GET /api/receptionist/checkin-activity
+ * @access Private
+ */
+export const getCheckInActivity = async (req, res) => {
+    try {
+        const hotelId = req.user.hotelId;
+
+        if (!hotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "User is not associated with a hotel." 
+            });
+        }
+
+        const hotelObjectId = new Types.ObjectId(hotelId);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        // Time slots for the day
+        const timeSlots = [
+            { time: "8 AM", start: 8, end: 10 },
+            { time: "10 AM", start: 10, end: 12 },
+            { time: "12 PM", start: 12, end: 14 },
+            { time: "2 PM", start: 14, end: 16 },
+            { time: "4 PM", start: 16, end: 18 },
+            { time: "6 PM", start: 18, end: 20 },
+        ];
+
+        const activityData = await Promise.all(
+            timeSlots.map(async (slot) => {
+                const slotStart = new Date(today);
+                slotStart.setHours(slot.start, 0, 0, 0);
+                const slotEnd = new Date(today);
+                slotEnd.setHours(slot.end, 0, 0, 0);
+
+                // Count check-ins in this time slot
+                const checkins = await Booking.countDocuments({
+                    hotelId: hotelObjectId,
+                    checkInDate: { $gte: slotStart, $lt: slotEnd },
+                    bookingStatus: 'checked-in'
+                });
+
+                // Count check-outs in this time slot
+                const checkouts = await Booking.countDocuments({
+                    hotelId: hotelObjectId,
+                    checkOutDate: { $gte: slotStart, $lt: slotEnd },
+                    bookingStatus: 'checked-out'
+                });
+
+                return {
+                    time: slot.time,
+                    checkins,
+                    checkouts
+                };
+            })
+        );
+
+        res.status(200).json({
+            success: true,
+            data: activityData
+        });
+
+    } catch (error) {
+        console.error("Error in getCheckInActivity:", error.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal server error",
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * @desc Get weekly revenue data
+ * @route GET /api/receptionist/weekly-revenue
+ * @access Private
+ */
+export const getWeeklyRevenue = async (req, res) => {
+    try {
+        const hotelId = req.user.hotelId;
+
+        if (!hotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "User is not associated with a hotel." 
+            });
+        }
+
+        const hotelObjectId = new Types.ObjectId(hotelId);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Get last 7 days
+        const weekData = [];
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        for (let i = 6; i >= 0; i--) {
+            const day = new Date(today);
+            day.setDate(day.getDate() - i);
+            const nextDay = new Date(day);
+            nextDay.setDate(nextDay.getDate() + 1);
+
+            const revenueResult = await Booking.aggregate([
+                {
+                    $match: {
+                        hotelId: hotelObjectId,
+                        createdAt: { $gte: day, $lt: nextDay },
+                        bookingStatus: { $in: ['confirmed', 'checked-in', 'checked-out'] }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$totalAmount" }
+                    }
+                }
+            ]);
+
+            weekData.push({
+                day: dayNames[day.getDay()],
+                revenue: revenueResult[0]?.total || 0
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: weekData
+        });
+
+    } catch (error) {
+        console.error("Error in getWeeklyRevenue:", error.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal server error",
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * @desc Get pending check-ins for today
+ * @route GET /api/receptionist/pending-checkins
+ * @access Private
+ */
+export const getPendingCheckIns = async (req, res) => {
+    try {
+        const hotelId = req.user.hotelId;
+
+        if (!hotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "User is not associated with a hotel." 
+            });
+        }
+
+        const hotelObjectId = new Types.ObjectId(hotelId);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const pendingCheckIns = await Booking.find({
+            hotelId: hotelObjectId,
+            checkInDate: { $gte: today, $lt: tomorrow },
+            bookingStatus: { $in: ['pending', 'confirmed'] }
+        })
+        .populate('roomId', 'roomNumber')
+        .sort({ checkInDate: 1 })
+        .limit(10)
+        .lean();
+
+        const formattedData = pendingCheckIns.map(booking => ({
+            _id: booking._id,
+            guestName: booking.guestName,
+            roomNumber: booking.roomId?.roomNumber || 'N/A',
+            checkInDate: booking.checkInDate,
+            confirmationCode: booking.confirmationCode,
+            guestPhone: booking.guestPhone,
+            guestEmail: booking.guestEmail
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: formattedData
+        });
+
+    } catch (error) {
+        console.error("Error in getPendingCheckIns:", error.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal server error",
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * @desc Get expected check-outs for today
+ * @route GET /api/receptionist/expected-checkouts
+ * @access Private
+ */
+export const getExpectedCheckOuts = async (req, res) => {
+    try {
+        const hotelId = req.user.hotelId;
+
+        if (!hotelId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "User is not associated with a hotel." 
+            });
+        }
+
+        const hotelObjectId = new Types.ObjectId(hotelId);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const expectedCheckOuts = await Booking.find({
+            hotelId: hotelObjectId,
+            checkOutDate: { $gte: today, $lt: tomorrow },
+            bookingStatus: { $in: ['confirmed', 'checked-in'] }
+        })
+        .populate('roomId', 'roomNumber')
+        .sort({ checkOutDate: 1 })
+        .limit(10)
+        .lean();
+
+        const formattedData = expectedCheckOuts.map(booking => ({
+            _id: booking._id,
+            guestName: booking.guestName,
+            roomNumber: booking.roomId?.roomNumber || 'N/A',
+            checkOutDate: booking.checkOutDate,
+            bookingStatus: booking.bookingStatus,
+            amountPaid: booking.amountPaid,
+            totalAmount: booking.totalAmount
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: formattedData
+        });
+
+    } catch (error) {
+        console.error("Error in getExpectedCheckOuts:", error.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal server error",
+            error: error.message 
+        });
+    }
 };

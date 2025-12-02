@@ -28,10 +28,9 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
-  waiterId: { // New field
+  waiterId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    default: null,
   },
   items: [
     {

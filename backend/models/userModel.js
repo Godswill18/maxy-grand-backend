@@ -26,7 +26,7 @@ const userSchema = new mongoose.Schema({
     role: {
         type: String,
         required: true,
-        enum: ['guest', 'receptionist', 'cleaner', 'waiter','admin', 'superadmin'],
+        enum: ['guest', 'receptionist', 'cleaner', 'waiter', 'headWaiter','admin', 'superadmin'],
         default: 'guest',
     },
     hotelId: {

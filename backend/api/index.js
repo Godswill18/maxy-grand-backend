@@ -25,6 +25,8 @@ import reportRoutes from '../routes/reportRoutes.js';
 import reviewsRoutes from '../routes/reviewRoutes.js';
 import dashboardRoutes from '../routes/dashboardRoutes.js';
 import analyticsRoutes from '../routes/analyticsRoutes.js';
+import performanceRoutes from '../routes/performanceRoutes.js';
+import waiterDashRoutes from '../routes/waiterDashRoutes.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -98,6 +100,8 @@ app.use('/api/reports', reportRoutes); // reports routes
 app.use('/api/reviews', reviewsRoutes); // reviews routes
 app.use('/api/dashboard', dashboardRoutes); // dashboard routes
 app.use('/api/analytics', analyticsRoutes); // analytics routes
+app.use('/api/performance', performanceRoutes); // performance routes
+app.use('/api/waiter-dashboard', waiterDashRoutes); // waiter dashboard routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

@@ -19,6 +19,7 @@ import {
 } from '../controllers/roomsController.js';
 import roomsImages from '../config/roomsMulter.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
+import { getAvailableRooms } from '../controllers/bookingController.js';
 
 const router = express.Router();
 
@@ -90,6 +91,8 @@ router.patch('/:id/status', protectedRoute, isStaffOrAdmin, updateRoomStatus);
 
 // Alternative route (if you prefer RESTful pattern)
 router.patch('/:id', protectedRoute, isStaffOrAdmin, updateRoomStatus);
+
+router.get('/available', protectedRoute, getAvailableRooms);
 
 
 export default router;

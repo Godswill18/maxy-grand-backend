@@ -35,6 +35,7 @@ export const createMenuItem = async (req, res) => {
       estimatedPrepTime,
       tags,
       images,
+      isAvailable,
     });
 
     const savedMenuItem = await newMenuItem.save();

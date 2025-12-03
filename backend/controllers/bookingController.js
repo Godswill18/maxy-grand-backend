@@ -56,7 +56,7 @@ export const createBooking = async (req, res) => {
 
     // 2️⃣ Find the specific room
     // console.log('BookingController: Looking for room with ID:', roomId);
-    const room = await Room.findById(roomId);
+    const room = await RoomType.findById(roomId);
     // console.log('BookingController: Found room:', room);
     if (!room) {
       return res.status(404).json({ success: false, error: 'Room not found' });

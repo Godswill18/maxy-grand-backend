@@ -466,28 +466,28 @@ export const getMyPendingTasks = async (req, res) => {
 //   }
 // };
 
-export const getHotelCleaningRequests = async (req, res) => {
-  try {
-    const hotelId = req.user.hotelId;
+// export const getHotelCleaningRequests = async (req, res) => {
+//   try {
+//     const hotelId = req.user.hotelId;
 
-    const requests = await CleaningRequest.find({ hotelId })
-      .populate({
-        path: 'roomId',
-        select: 'roomNumber status',
-        populate: {
-          path: 'roomTypeId',
-          select: 'name'
-        }
-      })
-      .populate('assignedCleaner', 'firstName lastName email')
-      .populate('requestedBy', 'firstName lastName email')
-      .sort({ createdAt: -1 });
+//     const requests = await CleaningRequest.find({ hotelId })
+//       .populate({
+//         path: 'roomId',
+//         select: 'roomNumber status',
+//         populate: {
+//           path: 'roomTypeId',
+//           select: 'name'
+//         }
+//       })
+//       .populate('assignedCleaner', 'firstName lastName email')
+//       .populate('requestedBy', 'firstName lastName email')
+//       .sort({ createdAt: -1 });
 
-    res.status(200).json(requests);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error fetching requests', error: error.message });
-  }
-};
+//     res.status(200).json(requests);
+//   } catch (error) {
+//     res.status(500).json({ message: 'Server error fetching requests', error: error.message });
+//   }
+// };
 
 export const getCleaningRooms = async (req, res) => {
   try {
@@ -1063,3 +1063,54 @@ export const getAllCleaningRequestsInHotel = async (req, res) => {
         res.status(500).json({ success: false, error: "Internal server error" });
     }
 };
+
+export const getHotelCleaningRequests = async (req, res) => {
+  try {
+    const userRole = req.user.role;
+    const userHotelId = req.user.hotelId;
+    
+    // Query parameters from frontend
+    const { hotelId, all } = req.query;
+    
+    let filter = {};
+
+    // Logic for SuperAdmin vs Admin/Staff
+    if (userRole === 'superadmin') {
+      if (all === 'true') {
+        // No filter on hotelId -> Get ALL requests
+        filter = {};
+      } else if (hotelId) {
+        // Filter by specific hotel requested by frontend
+        filter = { hotelId };
+      } else {
+        // Default fallback (optional): Maybe return all or nothing? 
+        // Let's default to all for superadmin if nothing specified
+        filter = {};
+      }
+    } else {
+      // Regular Admin/Staff: STRICTLY force their own hotelId
+      filter = { hotelId: userHotelId };
+    }
+
+    const requests = await CleaningRequest.find(filter)
+      .populate({
+        path: 'roomId',
+        select: 'roomNumber status',
+        populate: {
+          path: 'roomTypeId',
+          select: 'name'
+        }
+      })
+      // Populate Hotel info so we can display it in the UI
+      .populate('hotelId', 'name') 
+      .populate('assignedCleaner', 'firstName lastName email')
+      .populate('requestedBy', 'firstName lastName email')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json(requests);
+  } catch (error) {
+    console.error("Error fetching requests:", error);
+    res.status(500).json({ message: 'Server error fetching requests', error: error.message });
+  }
+};
+

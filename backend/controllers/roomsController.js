@@ -596,7 +596,7 @@ export const deleteRoom = async (req, res) => {
 
 export const getAllRooms = async (req, res) => {
     try{
-        const rooms = await RoomType.find();
+        const rooms = await RoomType.find().populate('hotelId', 'name city address');
         return res.status(200).json({
             success: true,
             data: rooms
@@ -610,7 +610,7 @@ export const getAllRooms = async (req, res) => {
 export const getRoomById = async (req, res) => {
     try{
         const roomId = req.params.id;
-        const room = await RoomType.findById(roomId);
+        const room = await RoomType.findById(roomId).populate('hotelId', 'name city address');
         if(!room){
             return res.status(404).json({ success: false, error: "Room type not found" });
         }

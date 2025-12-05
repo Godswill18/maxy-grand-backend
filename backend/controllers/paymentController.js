@@ -227,7 +227,7 @@ export const getAllPayments = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
-    console.log(`Found ${payments.length} total payments`);
+    // console.log(`Found ${payments.length} total payments`);
 
     return res.status(200).json({
       success: true,

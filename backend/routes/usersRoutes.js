@@ -1,6 +1,6 @@
 import express from 'express';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
-import { signUp, login, logout, getAdmins, getUser, getAllStaff, updateStaffStatus, getAllGuests, getUserById, updateStaffRole, findUserByEmail, createGuestAccount, getAllStaffInHotel} from '../controllers/usersController.js';
+import { signUp, login, logout, getAdmins, getUser, getAllStaff, updateStaffStatus, getAllGuests, getUserById, updateStaffRole, findUserByEmail, createGuestAccount, getAllStaffInHotel, loginGuest} from '../controllers/usersController.js';
 import { adminAndSuperAdminMiddleware, superAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -11,9 +11,11 @@ router.post('/create-user', signUp);
 
 router.post('/login-user', login);
 
+router.post('/login-guest', loginGuest);
+
 router.get('/admins', protectedRoute, superAdminMiddleware, getAdmins);
 
-router.get('/get-all-staff', protectedRoute, superAdminMiddleware, getAllStaff);
+router.get('/get-all-staff', protectedRoute, adminAndSuperAdminMiddleware, getAllStaff);
 
 router.get('/get-hotel-staffs', protectedRoute, adminAndSuperAdminMiddleware, getAllStaffInHotel);
 

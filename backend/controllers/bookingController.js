@@ -2,21 +2,265 @@
 import Booking from '../models/bookingModel.js';
 import Room from '../models/roomModel.js';
 import { generateConfirmationCode } from '../lib/utils/codeGenerator.js';
+import https from 'https';
 import RoomType from '../models/roomTypeModel.js';
+import mongoose from 'mongoose';
+import Payment from '../models/paymentModel.js';
 
 // Helper function to get a fully populated booking
 const getPopulatedBooking = async (id) => {
   return await Booking.findById(id)
     .populate('hotelId', 'name')
     .populate({
-        path: 'roomId',
-        select: 'roomNumber', // Just get the room number
-        populate: {
-            path: 'roomTypeId', // Get room type info
-            select: 'name price'
-        }
+        path: 'roomTypeId',
+        select: 'roomNumber price name amenities description', // Just get the room number
+    
     })
     .populate('guestId', 'firstName lastName email');
+};
+
+
+/**
+ * @desc Check room availability for booking
+ * @route POST /api/bookings/check-availability
+ */
+export const checkRoomAvailability = async (req, res) => {
+  try {
+    const { roomTypeId, checkInDate, checkOutDate, numberOfRooms } = req.body;
+
+    // Validate inputs
+    if (!roomTypeId || !checkInDate || !checkOutDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        available: false
+      });
+    }
+
+    // Validate dates
+    if (new Date(checkOutDate) <= new Date(checkInDate)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Check-out date must be after check-in date',
+        available: false
+      });
+    }
+
+    // Check for conflicting bookings
+    const conflictingBookings = await Booking.countDocuments({
+      roomTypeId: roomTypeId,
+      bookingStatus: { $in: ['confirmed', 'checked-in'] },
+      $and: [
+        { checkInDate: { $lt: new Date(checkOutDate) } },
+        { checkOutDate: { $gt: new Date(checkInDate) } },
+      ]
+    });
+
+    const requestedRooms = numberOfRooms || 1;
+    const available = conflictingBookings < requestedRooms;
+
+    return res.status(200).json({
+      success: true,
+      available,
+      conflictingBookings,
+      requestedRooms,
+      message: available 
+        ? 'Room is available for selected dates'
+        : `Only ${requestedRooms - conflictingBookings} room(s) available for selected dates`
+    });
+
+  } catch (error) {
+    console.error('Error checking room availability:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      available: false
+    });
+  }
+};
+
+/**
+ * @desc Create booking(s) after successful payment
+ * @route POST /api/bookings/create-with-payment
+ */
+export const createBookingWithPayment = async (req, res) => {
+  try {
+    const user = req.user;
+    const {
+      roomTypeId,
+      hotelId,
+      guestName,
+      guestEmail,
+      guestPhone,
+      checkInDate,
+      checkOutDate,
+      numberOfGuests,
+      specialRequests,
+      totalAmount,
+      numberOfRooms,
+      paymentReference,
+      paymentAmount,
+    } = req.body;
+
+    // 1️⃣ Verify payment with Paystack first
+    const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+
+    const verifyPaymentPromise = new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.paystack.co',
+        port: 443,
+        path: `/transaction/verify/${paymentReference}`,
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`
+        }
+      };
+
+      const paystackRequest = https.request(options, (paystackRes) => {
+        let data = '';
+
+        paystackRes.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        paystackRes.on('end', () => {
+          try {
+            const response = JSON.parse(data);
+            if (response.status && response.data.status === 'success') {
+              resolve(response.data);
+            } else {
+              reject(new Error('Payment verification failed'));
+            }
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+
+      paystackRequest.on('error', (error) => {
+        reject(error);
+      });
+
+      paystackRequest.end();
+    });
+
+    let paymentData;
+    try {
+      paymentData = await verifyPaymentPromise;
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment verification failed. No booking created.',
+      });
+    }
+
+    // 2️⃣ Payment verified - now validate booking data
+    if (new Date(checkOutDate) <= new Date(checkInDate)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-out date must be after check-in date' 
+      });
+    }
+
+    // 3️⃣ Find the room
+    const room = await RoomType.findById(roomTypeId);
+    if (!room) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Room not found' 
+      });
+    }
+
+    // 4️⃣ Check availability for ALL rooms
+    const conflictingBooking = await Booking.findOne({
+      roomTypeId: roomTypeId,
+      bookingStatus: { $in: ['confirmed', 'checked-in'] },
+      $and: [
+        { checkInDate: { $lt: new Date(checkOutDate) } },
+        { checkOutDate: { $gt: new Date(checkInDate) } },
+      ]
+    });
+
+    if (conflictingBooking) {
+      // Payment was made but room is not available - should refund
+      return res.status(400).json({
+        success: false,
+        error: `Room ${room.roomNumber} is no longer available for these dates. Please contact support for a refund.`,
+      });
+    }
+
+    // 5️⃣ Create bookings (one for each room)
+    const bookingsToCreate = [];
+    const amountPerRoom = totalAmount / numberOfRooms;
+    const paidAmountPerRoom = paymentAmount / numberOfRooms;
+
+    for (let i = 0; i < numberOfRooms; i++) {
+      let confirmationCode = '';
+      let isCodeUnique = false;
+      while (!isCodeUnique) {
+        confirmationCode = generateConfirmationCode(6);
+        const existingBooking = await Booking.findOne({ confirmationCode });
+        if (!existingBooking) {
+          isCodeUnique = true;
+        }
+      }
+
+      const booking = new Booking({
+        hotelId: hotelId || user.hotelId,
+        roomTypeId,
+        guestId: req.user._id,
+        guestName,
+        guestEmail,
+        guestPhone,
+        checkInDate,
+        checkOutDate,
+        bookingType: 'online',
+        totalAmount: amountPerRoom,
+        amountPaid: paidAmountPerRoom,
+        paymentStatus: 'paid',
+        bookingStatus: 'confirmed',
+        confirmationCode,
+        numberOfGuests,
+        specialRequests,
+      });
+
+      bookingsToCreate.push(booking.save());
+    }
+
+    // 6️⃣ Save all bookings
+    const savedBookings = await Promise.all(bookingsToCreate);
+
+    // 7️⃣ Create payment records for each booking
+    const paymentRecords = savedBookings.map(booking => {
+      return new Payment({
+        bookingId: booking._id,
+        amount: booking.amountPaid,
+        status: 'completed',
+        gatewayRef: paymentReference,
+      }).save();
+    });
+
+    await Promise.all(paymentRecords);
+
+    // 8️⃣ Emit socket events
+    for (const booking of savedBookings) {
+      const populatedBooking = await getPopulatedBooking(booking._id);
+      req.io.emit('bookingCreated', populatedBooking);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `${numberOfRooms} booking(s) created successfully`,
+      data: savedBookings,
+    });
+
+  } catch (error) {
+    console.error('Error creating booking with payment:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error' 
+    });
+  }
 };
 
 
@@ -29,7 +273,7 @@ export const createBooking = async (req, res) => {
   try {
     const user = req.user;
     const {
-      roomId, 
+      roomTypeId, 
       guestName,
       guestEmail,
       guestPhone,
@@ -55,8 +299,8 @@ export const createBooking = async (req, res) => {
     }
 
     // 2️⃣ Find the specific room
-    // console.log('BookingController: Looking for room with ID:', roomId);
-    const room = await RoomType.findById(roomId);
+    // console.log('BookingController: Looking for room with ID:', roomTypeId);
+    const room = await RoomType.findById(roomTypeId);
     // console.log('BookingController: Found room:', room);
     if (!room) {
       return res.status(404).json({ success: false, error: 'Room not found' });
@@ -67,7 +311,7 @@ export const createBooking = async (req, res) => {
     // An overlap exists if:
     // (Existing Check-in < New Check-out) AND (Existing Check-out > New Check-in)
     const conflictingBooking = await Booking.findOne({
-      roomId: roomId,
+      roomTypeId: roomTypeId,
       bookingStatus: { $in: ['confirmed', 'checked-in'] }, // Only check active bookings
       $and: [
         { checkInDate: { $lt: new Date(checkOutDate) } },
@@ -101,10 +345,10 @@ export const createBooking = async (req, res) => {
       }
     }
 
-    // 6️⃣ Create booking record (using 'roomId')
+    // 6️⃣ Create booking record (using 'roomTypeId')
     const booking = new Booking({
       hotelId: req.body.hotelId || user.hotelId,
-      roomId, // <-- FIX: Save 'roomId'
+      roomTypeId, // <-- FIX: Save 'roomId'
       guestId: guestId,
       guestName,
       guestEmail,
@@ -169,7 +413,7 @@ export const getAllBookings = async (req, res) => {
 
     const bookings = await Booking.find()
       .populate('hotelId', 'name')
-      .populate('roomId', 'roomNumber')
+      .populate('roomTypeId', 'roomNumber')
       .populate('guestId', 'fullName email')
       .sort({ createdAt: -1 }); // Sort by newest first
 
@@ -310,7 +554,7 @@ export const updateBooking = async (req, res) => {
     const populatedBooking = await Booking.findById(updatedBooking._id)
       .populate('hotelId', 'name')
       .populate({
-        path: 'roomId',
+        path: 'roomTypeId',
         select: 'roomNumber status',
         populate: {
           path: 'roomTypeId',
@@ -371,7 +615,7 @@ export const cancelBooking = async (req, res) => {
     const updatedBooking = await booking.save();
 
     // 4️⃣ Free up the room if it was reserved or occupied
-    const room = await Room.findById(booking.roomId);
+    const room = await Room.findById(booking.roomTypeId);
     if (room) {
       // If this booking had the room occupied or reserved, free it up
       if (room.currentBookingId?.toString() === bookingId) {
@@ -381,7 +625,7 @@ export const cancelBooking = async (req, res) => {
       } else if (room.status === 'reserved') {
         // Check if there are other bookings for this room
         const otherBookings = await Booking.find({
-          roomId: room._id,
+          roomTypeId: room._id,
           _id: { $ne: bookingId },
           bookingStatus: { $in: ['confirmed', 'checked-in'] }
         });
@@ -438,7 +682,7 @@ export const updateBookingStatus = async (req, res) => {
         }
 
         // --- 4. Update Room Status (as before) ---
-        const room = await Room.findById(booking.roomId); 
+        const room = await Room.findById(booking.roomTypeId); 
         if (room) {
             if (bookingStatus === 'checked-out' || bookingStatus === 'cancelled') {
                 room.status = 'cleaning';
@@ -509,7 +753,7 @@ export const deleteBooking = async (req, res) => {
     const bookingId = booking._id; // Save ID for emit
 
     // Free up the room
-    const room = await Room.findById(booking.roomId);
+    const room = await Room.findById(booking.roomTypeId);
     if (room && room.currentBookingId?.toString() === bookingId.toString()) {
       room.status = 'available';
       room.currentBookingId = null;
@@ -536,14 +780,34 @@ export const deleteBooking = async (req, res) => {
 export const getUserBookings = async (req, res) => {
   try {
     const userId = req.params.userId;
-    const bookings = await Booking.find({ guestId: userId })
-      .populate('hotelId', 'name')
-      .populate('roomId', 'roomNumber');
+    
+    console.log('Fetching bookings for user:', userId); // Debug log
 
-    return res.status(200).json({ success: true, data: bookings });
+    
+const objectId = new mongoose.Types.ObjectId(userId);
+    
+    const bookings = await Booking.find({ guestId: objectId })
+      .populate('hotelId', 'name address')
+      .populate({
+        path: 'roomTypeId',
+        select: 'name price images amenities roomNumber', // RoomType fields
+      })
+      .sort({ createdAt: -1 }); // Newest first
+
+    console.log('Found bookings:', bookings.length); // Debug log
+
+    return res.status(200).json({ 
+      success: true, 
+      data: bookings,
+      count: bookings.length 
+    });
   } catch (error) {
     console.error('Error fetching user bookings:', error.message);
-    return res.status(500).json({ success: false, error: 'Internal server error' });
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 };
 
@@ -626,7 +890,7 @@ export const getAllBookingsInHotel = async (req, res) => {
         const bookings = await Booking.find({ 
             hotelId: loggedInUserHotelId 
         })
-        .populate('roomId', 'roomNumber status')
+        .populate('roomTypeId', 'roomNumber status')
         .populate('guestId', 'firstName lastName email phoneNumber')
         .sort({ createdAt: -1 });
 

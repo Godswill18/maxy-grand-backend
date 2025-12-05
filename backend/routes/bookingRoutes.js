@@ -7,46 +7,46 @@ import {
   updateBookingStatus,
   deleteBooking,
   getUserBookings,
-  // checkoutRoom,
+  createBookingWithPayment,
   verifyBookingConfirmationCode,
   getHotelBookingSummary,
   updateBooking,
   cancelBooking,
-  getAllBookingsInHotel
+  getAllBookingsInHotel,
+  checkRoomAvailability
 } from '../controllers/bookingController.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+// ✅ FIXED ORDER - Most specific routes first
 router.get('/get-hotel-bookings', protectedRoute, adminAndSuperAdminMiddleware, getAllBookingsInHotel);
+router.get('/hotel-summary/:hotelId', protectedRoute, adminAndSuperAdminMiddleware, getHotelBookingSummary);
 
-// Create booking (online or in-person)
+// Create bookings
+router.post('/create-with-payment', protectedRoute, createBookingWithPayment);
 router.post('/create', protectedRoute, createBooking);
 
 // Get all bookings (Admin/Receptionist)
 router.get('/all', protectedRoute, isStaffOrAdmin, getAllBookings);
 
-// Get a single booking by ID
-router.get('/:id', protectedRoute, getBookingById);
+router.post('/check-availability', protectedRoute, checkRoomAvailability);
 
-// Update booking status (Admin/Receptionist)
-router.patch('/:id/status', protectedRoute, updateBookingStatus);
-
-// Delete booking (Admin/Receptionist)
-router.delete('/:id', protectedRoute, deleteBooking);
-
-// Get all bookings made by a user
+// Get all bookings for a specific user - MUST come before /:id
 router.get('/user/:userId', protectedRoute, getUserBookings);
 
-// router.put('/checkout/:roomId', checkoutRoom);
+// Update/Cancel booking
+router.put('/update/:id', protectedRoute, isStaffOrAdmin, updateBooking);
+router.patch('/cancel/:id', protectedRoute, isStaffOrAdmin, cancelBooking);
+router.patch('/:id/status', protectedRoute, updateBookingStatus);
 
-router.get('/hotel-summary/:hotelId', protectedRoute, adminAndSuperAdminMiddleware, getHotelBookingSummary);
-
+// Verify confirmation code
 router.post('/verify-code/:bookingId', protectedRoute, receptionistMiddleware, verifyBookingConfirmationCode);
 
-router.put('/update/:id', protectedRoute, isStaffOrAdmin, updateBooking);           // Update booking details
+// Get a single booking by ID - MUST come AFTER /user/:userId
+router.get('/:id', protectedRoute, getBookingById);  // ✅ CHANGED FROM /user/:id
 
-router.patch('/cancel/:id', protectedRoute, isStaffOrAdmin, cancelBooking);   // Cancel a booking
-
+// Delete booking
+router.delete('/:id', protectedRoute, deleteBooking);
 
 export default router;

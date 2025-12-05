@@ -8,9 +8,9 @@ const bookingSchema = new mongoose.Schema({
     required: true,
   },
   // Links to the specific room (e.g., "Room 101")
-  roomId: {
+  roomTypeId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Room',
+    ref: 'RoomType',
     required: true,
   },
   // Links to the User who booked online
@@ -18,6 +18,11 @@ const bookingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null, // Null if it's a walk-in
+  },
+  roomId:{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Room',
+    // required: true,
   },
   
   // --- For Walk-in Guests (Receptionist Entry) ---

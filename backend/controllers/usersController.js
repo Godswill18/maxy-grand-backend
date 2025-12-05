@@ -90,27 +90,45 @@ export const signUp = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-     try {
+  try {
     const { email, password } = req.body;
 
     // Validate input
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Please provide both email and password" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Please provide both email and password" 
+      });
     }
 
     // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ success: false, message: "Invalid email or password" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email or password" 
+      });
     }
 
     // Check password
     const isPasswordCorrect = await bcrypt.compare(password, user.password);
     if (!isPasswordCorrect) {
-      return res.status(400).json({ success: false, message: "Invalid email or password" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email or password" 
+      });
     }
 
-    // Generate token and set cookie
+    // 🔒 NEW: Check if user account is active
+    if (!user.isActive) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Your account has been deactivated. Please contact the administrator for assistance.",
+        code: "ACCOUNT_INACTIVE"
+      });
+    }
+
+    // Generate token and set cookie (only if user is active)
     const token = generateTokenAndSetCookie(user._id, res);
 
     // Return user data without sensitive information
@@ -121,7 +139,7 @@ export const login = async (req, res) => {
       email: user.email,
       role: user.role,
       hotelId: user.hotelId,
-      // phoneNumber: user.phoneNumber,
+      isActive: user.isActive, // Include isActive in response
     };
 
     res.status(200).json({
@@ -132,10 +150,60 @@ export const login = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in login controller:", error.message);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error" 
+    });
   }
+};
 
-}
+// export const login = async (req, res) => {
+//      try {
+//     const { email, password } = req.body;
+
+//     // Validate input
+//     if (!email || !password) {
+//       return res.status(400).json({ success: false, message: "Please provide both email and password" });
+//     }
+
+//     // Find user by email
+//     const user = await User.findOne({ email });
+//     if (!user) {
+//       return res.status(400).json({ success: false, message: "Invalid email or password" });
+//     }
+
+//     // Check password
+//     const isPasswordCorrect = await bcrypt.compare(password, user.password);
+//     if (!isPasswordCorrect) {
+//       return res.status(400).json({ success: false, message: "Invalid email or password" });
+//     }
+
+//     // Generate token and set cookie
+//     const token = generateTokenAndSetCookie(user._id, res);
+
+//     // Return user data without sensitive information
+//     const userData = {
+//       _id: user._id,
+//       firstName: user.firstName,
+//       lastName: user.lastName,
+//       email: user.email,
+//       role: user.role,
+//       hotelId: user.hotelId,
+//       // phoneNumber: user.phoneNumber,
+//     };
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Login successful",
+//       data: userData,
+//       token,
+//     });
+//   } catch (error) {
+//     console.error("Error in login controller:", error.message);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+
+// }
 
 export const getAdmins = async (req, res) => {
   try {

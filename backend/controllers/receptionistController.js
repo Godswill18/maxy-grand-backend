@@ -557,27 +557,29 @@ export const updateBookingStatusCheckIn = async (req, res) => {
     const { bookingId } = req.params;
     const { confirmationCode, userId, guestDetails, preferences } = req.body;
 
-    // Find the booking
-    const booking = await Booking.findById(bookingId);
+    console.log('=== CHECK-IN DEBUG ===');
+    console.log('Booking ID:', bookingId);
+    console.log('Confirmation Code:', confirmationCode);
+
+    // Find the booking and populate roomTypeId
+    const booking = await Booking.findById(bookingId).populate('roomTypeId');
     if (!booking) {
       return res.status(404).json({ success: false, error: 'Booking not found' });
     }
 
-    // Find the associated room
-    const room = await Room.findById(booking.roomId);
-    if (!room) {
-      return res.status(404).json({ success: false, error: 'Room for this booking not found' });
-    }
+    console.log('Booking found:', {
+      id: booking._id,
+      roomTypeId: booking.roomTypeId,
+      bookingType: booking.bookingType,
+      bookingStatus: booking.bookingStatus
+    });
 
-    // Check for errors
+    // Check if already checked in
     if (booking.bookingStatus === 'checked-in') {
       return res.status(400).json({ success: false, error: 'Guest is already checked in' });
     }
-    if (room.status === 'occupied') {
-      return res.status(400).json({ success: false, error: `Room ${room.roomNumber} is already occupied` });
-    }
 
-    // ⭐ NEW: Only verify confirmation code for ONLINE bookings ⭐
+    // Verify confirmation code for ONLINE bookings
     if (booking.bookingType === 'online') {
       if (!confirmationCode) {
         return res.status(400).json({ 
@@ -593,17 +595,57 @@ export const updateBookingStatusCheckIn = async (req, res) => {
         });
       }
     }
-    // Walk-ins don't need confirmation code verification
 
-    // Update booking and room
+    // 🔥 KEY FIX: Find an available room of the booked type
+    let room;
+    
+    // If booking already has a specific room assigned, use it
+    if (booking.roomId) {
+      room = await Room.findById(booking.roomId);
+      console.log('Using pre-assigned room:', room?.roomNumber);
+    }
+    
+    // If no room assigned or room not found, find an available one
+    if (!room) {
+      console.log('Finding available room for roomTypeId:', booking.roomTypeId._id);
+      
+      room = await Room.findOne({
+        hotelId: booking.hotelId,
+        roomTypeId: booking.roomTypeId._id,
+        status: { $in: ['available', 'cleaning'] } // Can check into available or freshly cleaned rooms
+      }).populate('roomTypeId');
+
+      if (!room) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `No available rooms of type "${booking.roomTypeId.name}" found. Please contact management.` 
+        });
+      }
+
+      console.log('Found available room:', room.roomNumber);
+      
+      // Assign this room to the booking
+      booking.roomId = room._id;
+    }
+
+    // Check if room is already occupied by another booking
+    if (room.status === 'occupied' && room.currentBookingId?.toString() !== booking._id.toString()) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Room ${room.roomNumber} is already occupied by another guest` 
+      });
+    }
+
+    // Update booking details
     booking.bookingStatus = 'checked-in';
     booking.guestDetails = guestDetails;
     booking.preferences = preferences;
     
     if (userId) {
-      booking.guestId = userId; // Link to user account
+      booking.guestId = userId; // Link to user account if provided
     }
 
+    // Update room status
     room.status = 'occupied';
     room.currentBookingId = booking._id;
     room.currentGuest = userId || null;
@@ -612,28 +654,39 @@ export const updateBookingStatusCheckIn = async (req, res) => {
     await booking.save();
     await room.save();
 
-    // Send the updated, populated booking back
+    console.log('✅ Check-in successful. Room:', room.roomNumber, 'Status:', room.status);
+
+    // Get fully populated booking for response
     const populatedBooking = await Booking.findById(booking._id)
       .populate({
         path: 'roomId',
         populate: { path: 'roomTypeId' }
       })
+      .populate({
+        path: 'roomTypeId',
+        select: 'name price roomNumber'
+      })
       .populate('guestId');
 
-    // Emit socket event
+    // Emit socket event for real-time updates
     if (req.io) {
       req.io.emit('bookingUpdated', populatedBooking);
     }
 
     return res.status(200).json({ 
       success: true, 
-      message: 'Guest checked in successfully',
+      message: `Guest checked into Room ${room.roomNumber} successfully`,
       data: populatedBooking 
     });
 
   } catch (error) {
-    console.error("Check-in error:", error);
-    return res.status(500).json({ success: false, error: 'Server error during check-in' });
+    console.error("❌ Check-in error:", error);
+    console.error("Stack:", error.stack);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Server error during check-in',
+      details: error.message 
+    });
   }
 };
 

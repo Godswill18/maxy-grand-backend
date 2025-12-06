@@ -46,14 +46,15 @@ const shiftSchema = new mongoose.Schema({
         ref: 'User',
         required: true,
     },
-    isActive: {
+    // ✅ NEW: isShiftTime (True when current time is within shift hours)
+    isShiftTime: {
         type: Boolean,
-        default: false, // True when shift is currently in progress
+        default: false,
     },
-    // ✅ NEW: Emergency activation
+    // ✅ Emergency activation (bypasses time checks)
     emergencyActivated: {
         type: Boolean,
-        default: false, // When true, bypasses time checks
+        default: false,
     },
     emergencyActivatedBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -67,21 +68,25 @@ const shiftSchema = new mongoose.Schema({
 // Index for efficient queries
 shiftSchema.index({ userId: 1, startDate: 1 });
 shiftSchema.index({ hotelId: 1, startDate: 1 });
-shiftSchema.index({ status: 1, isActive: 1 });
+shiftSchema.index({ status: 1, isShiftTime: 1 });
 shiftSchema.index({ startDate: 1, endDate: 1 });
 shiftSchema.index({ emergencyActivated: 1 });
 
-// ✅ Helper to get Nigerian time (WAT = UTC+1)
+/**
+ * Get Nigerian Time (WAT = UTC+1)
+ */
 shiftSchema.statics.getNigerianTime = function() {
     const now = new Date();
-    // Convert to Nigerian time (UTC+1)
-    const nigerianTime = new Date(now.getTime() + (1 * 60 * 60 * 1000));
+    // Nigerian time is UTC+1
+    const nigerianTime = new Date(now.getTime());
     return nigerianTime;
 };
 
-// ✅ Method to check if shift is currently active (uses Nigerian time)
+/**
+ * ✅ Check if current time is within shift hours (uses Nigerian time)
+ * This method checks if RIGHT NOW is within the shift's daily time window
+ */
 shiftSchema.methods.isCurrentlyActive = function() {
-    // Get Nigerian time
     const now = this.constructor.getNigerianTime();
     
     // If emergency activated, consider it active
@@ -89,36 +94,59 @@ shiftSchema.methods.isCurrentlyActive = function() {
         return true;
     }
     
-    // Parse start time in Nigerian timezone
-    const [startHour, startMinute] = this.startTime.split(':').map(Number);
+    // Check if current date is within shift date range
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    
+    const todayEnd = new Date(now);
+    todayEnd.setHours(23, 59, 59, 999);
+    
     const shiftStart = new Date(this.startDate);
-    shiftStart.setHours(startHour, startMinute, 0, 0);
+    shiftStart.setHours(0, 0, 0, 0);
     
-    // Parse end time in Nigerian timezone
-    const [endHour, endMinute] = this.endTime.split(':').map(Number);
     const shiftEnd = new Date(this.endDate);
-    shiftEnd.setHours(endHour, endMinute, 0, 0);
+    shiftEnd.setHours(23, 59, 59, 999);
     
-    // Check if current Nigerian time is within shift period
-    return now >= shiftStart && now <= shiftEnd;
+    // Check if today is within the shift date range
+    if (todayStart < shiftStart || todayStart > shiftEnd) {
+        return false; // Not within shift date range
+    }
+    
+    // Parse shift times
+    const [startHour, startMinute] = this.startTime.split(':').map(Number);
+    const [endHour, endMinute] = this.endTime.split(':').map(Number);
+    
+    // Create time boundaries for TODAY
+    const shiftStartToday = new Date(now);
+    shiftStartToday.setHours(startHour, startMinute, 0, 0);
+    
+    const shiftEndToday = new Date(now);
+    shiftEndToday.setHours(endHour, endMinute, 0, 0);
+    
+    // Check if current Nigerian time is within today's shift hours
+    return now >= shiftStartToday && now <= shiftEndToday;
 };
 
-// ✅ Method to activate shift for emergency access
+/**
+ * ✅ Method to activate shift for emergency access
+ */
 shiftSchema.methods.activateEmergency = async function(activatedBy) {
     this.emergencyActivated = true;
     this.emergencyActivatedBy = activatedBy;
     this.emergencyActivatedAt = this.constructor.getNigerianTime();
-    this.isActive = true;
+    this.isShiftTime = true;
     this.status = 'in-progress';
     return await this.save();
 };
 
-// ✅ Method to deactivate emergency access
+/**
+ * ✅ Method to deactivate emergency access
+ */
 shiftSchema.methods.deactivateEmergency = async function() {
     this.emergencyActivated = false;
     // Check if should still be active based on time
     if (!this.isCurrentlyActive()) {
-        this.isActive = false;
+        this.isShiftTime = false;
     }
     return await this.save();
 };

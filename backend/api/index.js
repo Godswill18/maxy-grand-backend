@@ -29,6 +29,7 @@ import performanceRoutes from '../routes/performanceRoutes.js';
 import waiterDashRoutes from '../routes/waiterDashRoutes.js';
 import paymentRoutes from '../routes/paymentRoutes.js';
 import shiftRoutes from '../routes/shiftRoutes.js';
+import blogsRoutes from '../routes/blogRoutes.js';
 import { setupShiftCronJobs } from '../cron/shiftCronJobs.js';
 
 
@@ -107,6 +108,7 @@ app.use('/api/performance', performanceRoutes); // performance routes
 app.use('/api/waiter-dashboard', waiterDashRoutes); // waiter dashboard routes
 app.use('/api/payments', paymentRoutes); // payment routes
 app.use('/api/shifts', shiftRoutes); // shift routes
+app.use('/api/blogs', blogsRoutes); // blog routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

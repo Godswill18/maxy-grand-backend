@@ -1,7 +1,4 @@
 import express from 'express';
-import multer from 'multer';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import {
   getBlogPostsForGuests,
   getBlogBySlug,
@@ -15,55 +12,11 @@ import {
   uploadBlogImage,
   deleteBlogImage,
 } from '../controllers/blogController.js';
-// import { verifySuperadmin } from '../middlewares/authMiddleware.js';
+import { superAdminMiddleware } from '../middleware/authMiddleware.js';
+import blogImages from '../config/blogMulter.js';
+import { protectedRoute } from '../middleware/protectedRoutes.js';
 
 const router = express.Router();
-
-// Get __dirname equivalent in ES modules
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// ======================== MULTER CONFIGURATION ========================
-
-// Create uploads directory if it doesn't exist
-import fs from 'fs';
-
-const uploadDir = path.join(__dirname, '../public/uploads/blogs');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    const name = path.basename(file.originalname, ext);
-    cb(null, `${name}-${uniqueSuffix}${ext}`);
-  },
-});
-
-// File filter for images only
-const fileFilter = (req, file, cb) => {
-  const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  
-  if (allowedMimes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.'));
-  }
-};
-
-// Create multer upload middleware
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-  },
-});
 
 // ======================== PUBLIC ROUTES (No Authentication) ========================
 
@@ -98,7 +51,7 @@ router.put('/:id/views', incrementBlogViews);
  * @auth Requires superadmin token
  * @returns Array of all blog posts
  */
-router.get('/admin', verifySuperadmin, getAllBlogsForAdmin);
+router.get('/admin',protectedRoute, superAdminMiddleware, getAllBlogsForAdmin);
 
 /**
  * POST /api/blogs
@@ -107,7 +60,7 @@ router.get('/admin', verifySuperadmin, getAllBlogsForAdmin);
  * @body {title, excerpt, content, category, author, readTime, isLive, image}
  * @returns Created blog post
  */
-router.post('/', verifySuperadmin, upload.single('image'), createBlog);
+router.post('/', protectedRoute, superAdminMiddleware, blogImages.single('image'), createBlog);
 
 /**
  * PUT /api/blogs/:id
@@ -117,7 +70,7 @@ router.post('/', verifySuperadmin, upload.single('image'), createBlog);
  * @body {title, excerpt, content, category, author, readTime, isLive, image (optional)}
  * @returns Updated blog post
  */
-router.put('/:id', verifySuperadmin, upload.single('image'), updateBlog);
+router.put('/:id', protectedRoute,superAdminMiddleware, blogImages.single('image'), updateBlog);
 
 /**
  * DELETE /api/blogs/:id
@@ -126,7 +79,7 @@ router.put('/:id', verifySuperadmin, upload.single('image'), updateBlog);
  * @params id - blog ID
  * @returns Success message
  */
-router.delete('/:id', verifySuperadmin, deleteBlog);
+router.delete('/:id', protectedRoute, superAdminMiddleware, deleteBlog);
 
 /**
  * PUT /api/blogs/:id/toggle-live
@@ -136,7 +89,7 @@ router.delete('/:id', verifySuperadmin, deleteBlog);
  * @body {isLive}
  * @returns Updated blog post
  */
-router.put('/:id/toggle-live', verifySuperadmin, toggleBlogLive);
+router.put('/:id/toggle-live', protectedRoute,superAdminMiddleware, toggleBlogLive);
 
 /**
  * PUT /api/blogs/:id/set-live
@@ -146,7 +99,7 @@ router.put('/:id/toggle-live', verifySuperadmin, toggleBlogLive);
  * @body {isLive}
  * @returns Updated blog post
  */
-router.put('/:id/set-live', verifySuperadmin, setBlogLive);
+router.put('/:id/set-live', protectedRoute,superAdminMiddleware, setBlogLive);
 
 /**
  * POST /api/blogs/:id/images
@@ -156,7 +109,7 @@ router.put('/:id/set-live', verifySuperadmin, setBlogLive);
  * @body {image, alt (optional), caption (optional)}
  * @returns Uploaded image and all images
  */
-router.post('/:id/images', verifySuperadmin, upload.single('image'), uploadBlogImage);
+router.post('/:id/images',protectedRoute, superAdminMiddleware, blogImages.single('image'), uploadBlogImage);
 
 /**
  * DELETE /api/blogs/:id/images/:imageId
@@ -165,35 +118,7 @@ router.post('/:id/images', verifySuperadmin, upload.single('image'), uploadBlogI
  * @params id - blog ID, imageId - image ID
  * @returns Updated images array
  */
-router.delete('/:id/images/:imageId', verifySuperadmin, deleteBlogImage);
+router.delete('/:id/images/:imageId',protectedRoute, superAdminMiddleware, deleteBlogImage);
 
-// ======================== ERROR HANDLING FOR MULTER ========================
-
-/**
- * Multer error handling middleware
- */
-router.use((error, req, res, next) => {
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        success: false,
-        error: 'File too large. Maximum size is 5MB.',
-      });
-    }
-    return res.status(400).json({
-      success: false,
-      error: `File upload error: ${error.message}`,
-    });
-  }
-  
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.message,
-    });
-  }
-  
-  next();
-});
 
 export default router;

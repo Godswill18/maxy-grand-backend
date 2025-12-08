@@ -42,6 +42,27 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    accountNumber: {
+        type: String,
+        default: null,
+    },
+    bankName: {
+        type: String,
+        default: null,
+    },
+    // ✅ NEW: Password Reset OTP
+    passwordResetToken: {
+        type: String,
+        default: null,
+    },
+    passwordResetTokenExpiry: {
+        type: Date,
+        default: null,
+    },
+    passwordResetVerified: {
+        type: Boolean,
+        default: false,
+    },
 }, { timestamps: true });
 
 // Hash password before saving

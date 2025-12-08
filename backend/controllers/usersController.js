@@ -674,3 +674,296 @@ export const createGuestAccount = async (req, res) => {
     });
   }
 };
+
+
+// ✅ NEW: Update user profile (account number, bank name)
+export const updateUserProfile = async (req, res) => {
+  try {
+    const userId = req.user._id; // From protected route middleware
+    const { accountNumber, bankName } = req.body;
+
+    if (!accountNumber || !bankName) {
+      return res.status(400).json({
+        success: false,
+        message: "Account number and bank name are required"
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      {
+        accountNumber,
+        bankName
+      },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      data: updatedUser
+    });
+
+  } catch (error) {
+    console.error("Error in updateUserProfile:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+// ✅ NEW: Request password reset (generates OTP and sends email)
+export const requestPasswordReset = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Email must match user's registered email
+    if (user.email !== email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email does not match your registered email"
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Save OTP to user
+    user.passwordResetToken = otp;
+    user.passwordResetTokenExpiry = otpExpiry;
+    user.passwordResetVerified = false;
+    await user.save();
+
+    // ✅ Send OTP via email
+    try {
+      await sendOTPEmail(user.email, user.firstName, otp);
+    } catch (emailError) {
+      console.error("Error sending OTP email:", emailError);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send OTP. Please try again."
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "OTP sent to your email. Valid for 10 minutes.",
+      data: {
+        email: user.email,
+        expiresIn: "10 minutes"
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in requestPasswordReset:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+// ✅ NEW: Verify OTP
+export const verifyResetOTP = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { otp } = req.body;
+
+    if (!otp) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP is required"
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Check if OTP exists and hasn't expired
+    if (!user.passwordResetToken) {
+      return res.status(400).json({
+        success: false,
+        message: "No password reset request found. Please request a new OTP."
+      });
+    }
+
+    if (new Date() > user.passwordResetTokenExpiry) {
+      user.passwordResetToken = null;
+      user.passwordResetTokenExpiry = null;
+      await user.save();
+      return res.status(400).json({
+        success: false,
+        message: "OTP has expired. Please request a new one."
+      });
+    }
+
+    // Verify OTP
+    if (user.passwordResetToken !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP"
+      });
+    }
+
+    // Mark OTP as verified
+    user.passwordResetVerified = true;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "OTP verified successfully. You can now reset your password."
+    });
+
+  } catch (error) {
+    console.error("Error in verifyResetOTP:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+// ✅ NEW: Reset password with verified OTP
+export const resetPassword = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { newPassword, confirmPassword } = req.body;
+
+    if (!newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password and confirmation are required"
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Passwords do not match"
+      });
+    }
+
+    if (newPassword.length < 4) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 4 characters long"
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Check if OTP was verified
+    if (!user.passwordResetVerified) {
+      return res.status(400).json({
+        success: false,
+        message: "Please verify your OTP first"
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    user.passwordResetToken = null;
+    user.passwordResetTokenExpiry = null;
+    user.passwordResetVerified = false;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successfully"
+    });
+
+  } catch (error) {
+    console.error("Error in resetPassword:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+// ✅ Helper function: Send OTP email
+async function sendOTPEmail(email, firstName, otp) {
+  const nodemailer = await import('nodemailer');
+  
+  // Configure your email service
+  const transporter = nodemailer.createTransport({
+    service: process.env.EMAIL_SERVICE || 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER || 'gokhamera@gmail.com',
+      pass: process.env.EMAIL_PASSWORD || 'wzhy yaqj ntzl qkyh',
+    },
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: "Password Reset OTP - Hotel Management System",
+    html: `
+      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h2 style="color: #333;">Password Reset Request</h2>
+        </div>
+        
+        <p>Hi ${firstName},</p>
+        
+        <p>You requested to reset your password. Here is your One-Time Password (OTP):</p>
+        
+        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; text-align: center; margin: 20px 0;">
+          <h3 style="color: #007bff; margin: 0; font-size: 32px; letter-spacing: 5px;">${otp}</h3>
+        </div>
+        
+        <p style="color: #666;">
+          <strong>Important:</strong> This OTP is valid for <strong>10 minutes</strong> only.
+        </p>
+        
+        <p style="color: #666;">
+          If you did not request this password reset, please ignore this email. Your account is secure.
+        </p>
+        
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+        
+        <p style="color: #999; font-size: 12px;">
+          This is an automated email. Please do not reply to this message.
+        </p>
+      </div>
+    `
+  };
+
+  return transporter.sendMail(mailOptions);
+}

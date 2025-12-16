@@ -17,7 +17,8 @@ import {
   getCheckInActivity,
   getWeeklyRevenue,
   getPendingCheckIns,
-  getExpectedCheckOuts
+  getExpectedCheckOuts,
+  updateRoomStatus
 } from '../controllers/receptionistController.js';
 import { isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
 
@@ -37,6 +38,7 @@ router.post('/book-guest', protectedRoute, receptionistMiddleware, bookGuest);
 router.patch('/:bookingId/check-in', protectedRoute, receptionistMiddleware, updateBookingStatusCheckIn);
 router.patch('/:bookingId/check-out', protectedRoute, receptionistMiddleware, checkOutGuest);
 router.patch('/:bookingId/extend', protectedRoute, receptionistMiddleware, extendGuestStay); // NEW
+router.patch('/rooms/:roomId/status', protectedRoute, receptionistMiddleware, updateRoomStatus); // NEW
 
 // ===== ALERTS & NOTIFICATIONS =====
 router.get('/checkout-alerts', protectedRoute, receptionistMiddleware, getCheckoutAlerts); // NEW

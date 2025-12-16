@@ -26,19 +26,22 @@ const getPopulatedBooking = async (id) => {
  */
 export const checkRoomAvailability = async (req, res) => {
   try {
-    const { roomTypeId, checkInDate, checkOutDate, numberOfRooms } = req.body;
+    const { roomTypeId, checkInDate, checkOutDate } = req.body;
 
     // Validate inputs
     if (!roomTypeId || !checkInDate || !checkOutDate) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields',
+        error: 'Missing required fields: roomTypeId, checkInDate, checkOutDate',
         available: false
       });
     }
 
     // Validate dates
-    if (new Date(checkOutDate) <= new Date(checkInDate)) {
+    const checkIn = new Date(checkInDate);
+    const checkOut = new Date(checkOutDate);
+
+    if (checkOut <= checkIn) {
       return res.status(400).json({
         success: false,
         error: 'Check-out date must be after check-in date',
@@ -46,31 +49,48 @@ export const checkRoomAvailability = async (req, res) => {
       });
     }
 
-    // Check for conflicting bookings
-    const conflictingBookings = await Booking.countDocuments({
+    console.log(`📅 Checking if room type is booked: ${roomTypeId}`);
+    console.log(`   Check-in: ${checkIn.toISOString()}`);
+    console.log(`   Check-out: ${checkOut.toISOString()}`);
+
+    // ✅ Check if the selected room type has been booked within the checkin and checkout date
+    const hasConflictingBooking = await Booking.findOne({
       roomTypeId: roomTypeId,
       bookingStatus: { $in: ['confirmed', 'checked-in'] },
       $and: [
-        { checkInDate: { $lt: new Date(checkOutDate) } },
-        { checkOutDate: { $gt: new Date(checkInDate) } },
+        { checkInDate: { $lt: checkOut } },    // Existing booking starts before requested checkout
+        { checkOutDate: { $gt: checkIn } },    // Existing booking ends after requested checkin
       ]
-    });
+    }).select('_id roomNumber checkInDate checkOutDate bookingStatus guestName');
 
-    const requestedRooms = numberOfRooms || 1;
-    const available = conflictingBookings < requestedRooms;
+    const isAvailable = !hasConflictingBooking;  // Available if NO conflicting booking
 
+    console.log(`   Conflicting booking found? ${hasConflictingBooking ? '✅ YES' : '❌ NO'}`);
+    if (hasConflictingBooking) {
+      console.log(`   Guest: ${hasConflictingBooking.guestName}`);
+      console.log(`   Room: ${hasConflictingBooking.roomNumber || 'N/A'}`);
+    }
+
+    // ✅ Return response
     return res.status(200).json({
       success: true,
-      available,
-      conflictingBookings,
-      requestedRooms,
-      message: available 
-        ? 'Room is available for selected dates'
-        : `Only ${requestedRooms - conflictingBookings} room(s) available for selected dates`
+      available: isAvailable,
+      hasConflictingBooking: !!hasConflictingBooking,
+      conflictingBooking: hasConflictingBooking ? {
+        _id: hasConflictingBooking._id,
+        roomNumber: hasConflictingBooking.roomNumber,
+        guestName: hasConflictingBooking.guestName,
+        checkInDate: hasConflictingBooking.checkInDate,
+        checkOutDate: hasConflictingBooking.checkOutDate,
+        status: hasConflictingBooking.bookingStatus
+      } : null,
+      message: isAvailable
+        ? `✅ Room type is available for ${checkInDate} to ${checkOutDate}`
+        : `❌ Room type is already booked for this date range by ${hasConflictingBooking.guestName}`
     });
 
   } catch (error) {
-    console.error('Error checking room availability:', error.message);
+    console.error('❌ Error checking room availability:', error.message);
     return res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -79,6 +99,214 @@ export const checkRoomAvailability = async (req, res) => {
   }
 };
 
+// export const checkRoomAvailability = async (req, res) => {
+//   try {
+//     const { roomTypeId, checkInDate, checkOutDate, numberOfRooms } = req.body;
+
+//     // Validate inputs
+//     if (!roomTypeId || !checkInDate || !checkOutDate) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Missing required fields: roomTypeId, checkInDate, checkOutDate',
+//         available: false
+//       });
+//     }
+
+//     // Validate dates
+//     const checkIn = new Date(checkInDate);
+//     const checkOut = new Date(checkOutDate);
+
+//     if (checkOut <= checkIn) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Check-out date must be after check-in date',
+//         available: false
+//       });
+//     }
+
+//     const requestedRooms = numberOfRooms || 1;
+
+//     // ✅ STEP 1: Get total number of rooms of this type
+//     const roomType = await RoomType.findById(roomTypeId);
+//     if (!roomType) {
+//       return res.status(404).json({
+//         success: false,
+//         error: 'Room type not found',
+//         available: false
+//       });
+//     }
+
+//     const totalRoomsOfType = roomType.totalRooms || 1;
+
+//     console.log(`📊 Checking availability for room type: ${roomTypeId}`);
+//     console.log(`   Total rooms of this type: ${totalRoomsOfType}`);
+//     console.log(`   Requested rooms: ${requestedRooms}`);
+//     console.log(`   Check-in: ${checkIn.toISOString()}`);
+//     console.log(`   Check-out: ${checkOut.toISOString()}`);
+
+//     // ✅ STEP 2: Find ALL conflicting bookings for this room type during the date range
+//     const conflictingBookings = await Booking.find({
+//       roomTypeId: roomTypeId,
+//       bookingStatus: { $in: ['confirmed', 'checked-in'] },
+//       $and: [
+//         { checkInDate: { $lt: checkOut } },    // Existing booking starts before requested checkout
+//         { checkOutDate: { $gt: checkIn } },    // Existing booking ends after requested checkin
+//       ]
+//     }).select('_id roomNumber checkInDate checkOutDate bookingStatus');
+
+//     console.log(`   Conflicting bookings found: ${conflictingBookings.length}`);
+//     if (conflictingBookings.length > 0) {
+//       console.log(`   Booked rooms: ${conflictingBookings.map(b => b.roomNumber || 'N/A').join(', ')}`);
+//     }
+
+//     // ✅ STEP 3: Get unique rooms that are booked
+//     // If roomNumber is tracked, count distinct rooms
+//     const bookedRoomNumbers = new Set();
+//     conflictingBookings.forEach(booking => {
+//       if (booking.roomNumber) {
+//         bookedRoomNumbers.add(booking.roomNumber);
+//       }
+//     });
+
+//     // Use distinct room count if available, otherwise use booking count
+//     const bookedRoomsCount = bookedRoomNumbers.size > 0 
+//       ? bookedRoomNumbers.size 
+//       : conflictingBookings.length;
+
+//     console.log(`   Booked rooms count: ${bookedRoomsCount}`);
+
+//     // ✅ STEP 4: Calculate available rooms
+//     const availableRoomsCount = totalRoomsOfType - bookedRoomsCount;
+//     const isAvailable = availableRoomsCount >= requestedRooms;
+
+//     console.log(`   Available rooms: ${availableRoomsCount}`);
+//     console.log(`   Can book? ${isAvailable ? '✅ YES' : '❌ NO'}`);
+
+//     // ✅ STEP 5: Return response
+//     return res.status(200).json({
+//       success: true,
+//       available: isAvailable,
+//       totalRoomsOfType,
+//       bookedRoomsCount,
+//       availableRoomsCount,
+//       requestedRooms,
+//       conflictingBookingsCount: conflictingBookings.length,
+//       conflictingBookings: conflictingBookings.map(b => ({
+//         _id: b._id,
+//         roomNumber: b.roomNumber,
+//         checkInDate: b.checkInDate,
+//         checkOutDate: b.checkOutDate,
+//         status: b.bookingStatus
+//       })),
+//       message: isAvailable
+//         ? `✅ ${availableRoomsCount} room(s) available for selected dates`
+//         : `❌ Only ${availableRoomsCount} room(s) available (need ${requestedRooms})`
+//     });
+
+//   } catch (error) {
+//     console.error('❌ Error checking room availability:', error.message);
+//     return res.status(500).json({
+//       success: false,
+//       error: 'Internal server error',
+//       available: false
+//     });
+//   }
+// };
+
+// export const checkRoomAvailability = async (req, res) => {
+//   try {
+//     const { checkInDate, checkOutDate, hotelId } = req.body;
+
+//     // Validate inputs
+//     if (!checkInDate || !checkOutDate) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Missing required fields (checkInDate, checkOutDate)',
+//         data: []
+//       });
+//     }
+
+//     if (!hotelId) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Hotel ID is required',
+//         data: []
+//       });
+//     }
+
+//     // Validate dates
+//     const checkIn = new Date(checkInDate);
+//     const checkOut = new Date(checkOutDate);
+    
+//     if (checkOut <= checkIn) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Check-out date must be after check-in date',
+//         data: []
+//       });
+//     }
+
+//     // ✅ FIXED: Find all room types in the hotel
+//     const allRoomTypes = await RoomType.find({ hotelId: hotelId });
+
+//     if (allRoomTypes.length === 0) {
+//       return res.status(200).json({
+//         success: true,
+//         message: 'No room types found in this hotel',
+//         data: []
+//       });
+//     }
+
+//     // ✅ FIXED: Find all bookings that conflict with the requested dates
+//     const conflictingBookings = await Booking.find({
+//       hotelId: hotelId,
+//       roomTypeId: { $in: allRoomTypes.map(rt => rt._id) },
+//       bookingStatus: { $in: ['confirmed', 'checked-in'] },
+//       $and: [
+//         { checkInDate: { $lt: checkOut } },
+//         { checkOutDate: { $gt: checkIn } }
+//       ]
+//     }).select('roomTypeId');
+
+//     // Get the room type IDs that are booked
+//     const bookedRoomTypeIds = conflictingBookings.map(booking => booking.roomTypeId.toString());
+
+//     // Filter to get available room types
+//     const availableRoomTypes = allRoomTypes.filter(rt => 
+//       !bookedRoomTypeIds.includes(rt._id.toString())
+//     );
+
+//     // Format the response
+//     const availableRooms = availableRoomTypes.map(roomType => ({
+//       _id: roomType._id,
+//       roomNumber: roomType.roomNumber,
+//       name: roomType.name,
+//       capacity: roomType.capacity,
+//       price: roomType.price,
+//       roomTypeId: {
+//         _id: roomType._id,
+//         name: roomType.name,
+//         capacity: roomType.capacity,
+//         price: roomType.price
+//       }
+//     }));
+
+//     return res.status(200).json({
+//       success: true,
+//       message: `${availableRooms.length} room(s) available for selected dates`,
+//       data: availableRooms
+//     });
+
+//   } catch (error) {
+//     console.error('Error checking room availability:', error.message);
+//     return res.status(500).json({
+//       success: false,
+//       error: 'Internal server error',
+//       details: error.message,
+//       data: []
+//     });
+//   }
+// }
 /**
  * @desc Create booking(s) after successful payment
  * @route POST /api/bookings/create-with-payment
@@ -205,6 +433,8 @@ export const createBookingWithPayment = async (req, res) => {
         }
       }
 
+      // const guestDetails = {};
+
       const booking = new Booking({
         hotelId: hotelId || user.hotelId,
         roomTypeId,
@@ -220,6 +450,7 @@ export const createBookingWithPayment = async (req, res) => {
         paymentStatus: 'paid',
         bookingStatus: 'confirmed',
         confirmationCode,
+        // guestDetails,
         numberOfGuests,
         specialRequests,
       });
@@ -286,33 +517,63 @@ export const createBooking = async (req, res) => {
       preferences,
       numberOfGuests,
       specialRequests,
-      // signature
+      guestId: requestGuestId, // ✅ NEW: Accept guestId from request
     } = req.body;
 
-// const guestId = req.body.guestId || (bookingType === 'online' ? user._id : null);
+    console.log('📝 Creating booking with data:', {
+      roomTypeId,
+      guestName,
+      bookingType,
+      requestGuestId, // ✅ Log the guestId from request
+      hotelId: req.body.hotelId,
+    });
 
+    // ✅ Validate required fields
+    if (!roomTypeId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Room type ID is required' 
+      });
+    }
 
+    if (!guestName || !guestEmail || !guestPhone) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Guest name, email, and phone are required' 
+      });
+    }
+
+    if (!checkInDate || !checkOutDate) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-in and check-out dates are required' 
+      });
+    }
 
     // 1️⃣ Validate input dates
     if (new Date(checkOutDate) <= new Date(checkInDate)) {
-      return res.status(400).json({ success: false, error: 'Check-out date must be after check-in date' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-out date must be after check-in date' 
+      });
     }
 
-    // 2️⃣ Find the specific room
-    // console.log('BookingController: Looking for room with ID:', roomTypeId);
+    // 2️⃣ Find the specific room type
     const room = await RoomType.findById(roomTypeId);
-    // console.log('BookingController: Found room:', room);
     if (!room) {
-      return res.status(404).json({ success: false, error: 'Room not found' });
+      console.error('❌ Room type not found:', roomTypeId);
+      return res.status(404).json({ 
+        success: false, 
+        error: `Room type with ID ${roomTypeId} not found` 
+      });
     }
 
-    // 3️⃣ ⭐️ --- NEW AVAILABILITY LOGIC --- ⭐️
-    // Check for any bookings for this room that conflict with the requested dates.
-    // An overlap exists if:
-    // (Existing Check-in < New Check-out) AND (Existing Check-out > New Check-in)
+    console.log('✅ Room type found:', room._id, room.name);
+
+    // 3️⃣ Check availability - find any conflicting bookings
     const conflictingBooking = await Booking.findOne({
       roomTypeId: roomTypeId,
-      bookingStatus: { $in: ['confirmed', 'checked-in'] }, // Only check active bookings
+      bookingStatus: { $in: ['confirmed', 'checked-in'] },
       $and: [
         { checkInDate: { $lt: new Date(checkOutDate) } },
         { checkOutDate: { $gt: new Date(checkInDate) } },
@@ -320,36 +581,43 @@ export const createBooking = async (req, res) => {
     });
 
     if (conflictingBooking) {
+      console.log('❌ Room conflict found with booking:', conflictingBooking._id);
       return res.status(400).json({
         success: false,
-        error: `Room ${room.roomNumber} is already booked from ${new Date(conflictingBooking.checkInDate).toLocaleDateString()} to ${new Date(conflictingBooking.checkOutDate).toLocaleDateString()}`,
+        error: `Room is already booked from ${new Date(conflictingBooking.checkInDate).toLocaleDateString()} to ${new Date(conflictingBooking.checkOutDate).toLocaleDateString()}`,
       });
     }
-    // ⭐️ --- END NEW LOGIC --- ⭐️
 
-    // 4️⃣ Determine guest type
-    const guestId = bookingType === 'online' ? user._id : null;
+    // 4️⃣ ✅ FIXED: Determine guestId
+    // Use requestGuestId if provided (from verified guest or newly created user)
+    // Otherwise, use user._id if online booking, null if walk-in
+    const guestId = requestGuestId || (bookingType === 'online' ? user._id : null);
+    
+    console.log('👤 Guest ID set to:', guestId, '| Booking type:', bookingType);
 
     // 5️⃣ Determine payment status
     let paymentStatus = 'pending';
     if (amountPaid >= totalAmount) paymentStatus = 'paid';
     else if (amountPaid > 0) paymentStatus = 'partial';
 
+    // 6️⃣ Generate unique confirmation code
     let confirmationCode = '';
     let isCodeUnique = false;
     while (!isCodeUnique) {
-      confirmationCode = generateConfirmationCode(6); // Generate a 6-char code
+      confirmationCode = generateConfirmationCode(6);
       const existingBooking = await Booking.findOne({ confirmationCode });
       if (!existingBooking) {
         isCodeUnique = true;
       }
     }
 
-    // 6️⃣ Create booking record (using 'roomTypeId')
+    console.log('🔐 Generated confirmation code:', confirmationCode);
+
+    // 7️⃣ Create booking record
     const booking = new Booking({
       hotelId: req.body.hotelId || user.hotelId,
-      roomTypeId, // <-- FIX: Save 'roomId'
-      guestId: guestId,
+      roomTypeId, // Use roomTypeId as provided
+      guestId: guestId, // ✅ Use the properly set guestId
       guestName,
       guestEmail,
       guestPhone,
@@ -358,48 +626,38 @@ export const createBooking = async (req, res) => {
       bookingType,
       totalAmount,
       amountPaid,
-      paymentStatus,
+      paymentStatus: 'paid',
       bookingStatus: 'confirmed',
       confirmationCode: confirmationCode,
       guestDetails,
       preferences,
       numberOfGuests: numberOfGuests,
       specialRequests,
-      // signature
     });
 
     const savedBooking = await booking.save();
+    console.log('✅ Booking saved:', savedBooking._id);
 
-    // 7️⃣ Update room status ONLY if it's currently 'available'
-    // This booking is for the future, but we mark it as 'reserved'
-    // so a walk-in can't take it right now.
-    // Your check-in logic will handle changing it to 'occupied'.
-    // if (room.status === 'available') {
-    //     room.status = 'reserved';
-    //     await room.save();
-    // }
-    // NOTE: We DO NOT set room.currentBookingId here.
-    // That should only be set when the guest *actually checks in*.
-    // The `updateBookingStatus` function handles this.
-
-    // --- Socket.io Emit ---
+    // 8️⃣ Emit socket event
     const populatedBooking = await getPopulatedBooking(savedBooking._id);
-    req.io.emit('bookingCreated', populatedBooking);
+    req.io?.emit('bookingCreated', populatedBooking);
     
-    // ✅ Notify all connected clients that reports should refresh
-    // io.emit('report:update'); // 'io' is not defined here, use req.io
-
     return res.status(201).json({
       success: true,
       message: 'Booking created successfully',
       data: populatedBooking,
     });
+
   } catch (error) {
-    console.error('Error creating booking:', error.message);
-    return res.status(500).json({ success: false, error: 'Internal server error' });
+    console.error('❌ Error creating booking:', error.message);
+    console.error('Stack trace:', error.stack);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      details: error.message,
+    });
   }
 };
-
 /**
  * @desc Get all bookings (Admin/Receptionist)
  * @route GET /api/bookings/all
@@ -413,7 +671,7 @@ export const getAllBookings = async (req, res) => {
 
     const bookings = await Booking.find()
       .populate('hotelId', 'name')
-      .populate('roomTypeId', 'roomNumber')
+      .populate('roomTypeId', 'roomNumber name')
       .populate('guestId', 'fullName email')
       .sort({ createdAt: -1 }); // Sort by newest first
 
@@ -453,9 +711,9 @@ export const updateBooking = async (req, res) => {
       guestPhone,
       checkInDate,
       checkOutDate,
-      roomId,
+      roomId,           // ✅ This is actually roomTypeId from frontend
+      roomTypeId,       // ✅ Also roomTypeId (they're the same)
       numberOfGuests,
-      // guests,
       totalAmount,
       amountPaid,
       paymentStatus,
@@ -464,11 +722,24 @@ export const updateBooking = async (req, res) => {
       preferences,
     } = req.body;
 
+    console.log('📝 Update booking request:', {
+      bookingId,
+      roomId,
+      roomTypeId,
+      guestName
+    });
+
     // 1️⃣ Find the existing booking
     const booking = await Booking.findById(bookingId);
     if (!booking) {
       return res.status(404).json({ success: false, error: 'Booking not found' });
     }
+
+    console.log('✅ Found booking:', {
+      _id: booking._id,
+      currentRoomTypeId: booking.roomTypeId,
+      bookingStatus: booking.bookingStatus
+    });
 
     // 2️⃣ Validate dates if they're being updated
     if (checkInDate && checkOutDate) {
@@ -480,19 +751,35 @@ export const updateBooking = async (req, res) => {
       }
     }
 
-    // 3️⃣ Check for room availability conflicts (if room or dates are changing)
-    const isRoomChanging = roomId && roomId !== booking.roomId.toString();
+    // 3️⃣ Determine which roomTypeId to use (prioritize roomId from request, fallback to roomTypeId)
+    const newRoomTypeId = roomId || roomTypeId;
+
+    // 4️⃣ Check for room availability conflicts (if room or dates are changing)
+    const isRoomChanging = newRoomTypeId && newRoomTypeId !== booking.roomTypeId.toString();
     const areDatesChanging = (checkInDate && checkInDate !== booking.checkInDate.toISOString().split('T')[0]) || 
                              (checkOutDate && checkOutDate !== booking.checkOutDate.toISOString().split('T')[0]);
 
+    console.log('🔍 Change detection:', {
+      isRoomChanging,
+      areDatesChanging,
+      newRoomTypeId,
+      currentRoomTypeId: booking.roomTypeId.toString()
+    });
+
     if (isRoomChanging || areDatesChanging) {
-      const targetRoomId = roomId || booking.roomId;
+      const targetRoomTypeId = newRoomTypeId || booking.roomTypeId;
       const targetCheckIn = checkInDate || booking.checkInDate;
       const targetCheckOut = checkOutDate || booking.checkOutDate;
 
+      console.log('🔍 Checking conflicts for:', {
+        targetRoomTypeId,
+        targetCheckIn,
+        targetCheckOut
+      });
+
       const conflictingBooking = await Booking.findOne({
         _id: { $ne: bookingId }, // Exclude current booking
-        roomId: targetRoomId,
+        roomTypeId: targetRoomTypeId,
         bookingStatus: { $in: ['confirmed', 'checked-in'] },
         $and: [
           { checkInDate: { $lt: new Date(targetCheckOut) } },
@@ -501,23 +788,32 @@ export const updateBooking = async (req, res) => {
       });
 
       if (conflictingBooking) {
-        const room = await Room.findById(targetRoomId);
+        console.log('❌ Conflict found:', conflictingBooking._id);
+        // Get room info for better error message
+        const roomType = await RoomType.findById(targetRoomTypeId);
         return res.status(400).json({
           success: false,
-          error: `Room ${room?.roomNumber || targetRoomId} is already booked for the selected dates`,
+          error: `Room ${roomType?.name || targetRoomTypeId} is already booked for the selected dates`,
         });
       }
+
+      console.log('✅ No conflicts found');
     }
 
-    // 4️⃣ Update booking fields
+    // 5️⃣ Update booking fields
     if (guestName) booking.guestName = guestName;
     if (guestEmail) booking.guestEmail = guestEmail;
     if (guestPhone) booking.guestPhone = guestPhone;
     if (checkInDate) booking.checkInDate = new Date(checkInDate);
     if (checkOutDate) booking.checkOutDate = new Date(checkOutDate);
-    if (roomId) booking.roomId = roomId;
     
-    // Handle numberOfGuests (new field) or guests (old field)
+    // ✅ Update roomTypeId if provided
+    if (newRoomTypeId) {
+      console.log('🔄 Updating roomTypeId from', booking.roomTypeId, 'to', newRoomTypeId);
+      booking.roomTypeId = newRoomTypeId;
+    }
+    
+    // Handle numberOfGuests
     if (numberOfGuests !== undefined) {
       booking.numberOfGuests = numberOfGuests;
     } 
@@ -547,24 +843,22 @@ export const updateBooking = async (req, res) => {
       };
     }
 
-    // 5️⃣ Save updated booking
+    // 6️⃣ Save updated booking
     const updatedBooking = await booking.save();
     
-    // 6️⃣ Populate the booking with related data
+    console.log('✅ Booking updated successfully:', updatedBooking._id);
+    
+    // 7️⃣ Populate the booking with related data
     const populatedBooking = await Booking.findById(updatedBooking._id)
       .populate('hotelId', 'name')
       .populate({
         path: 'roomTypeId',
-        select: 'roomNumber status',
-        populate: {
-          path: 'roomTypeId',
-          select: 'name pricePerNight description capacity'
-        }
+        select: 'roomNumber name price amenities description'
       })
       .populate('guestId', 'firstName lastName email');
 
-    // 7️⃣ Emit socket event
-    req.io.emit('bookingUpdated', populatedBooking);
+    // 8️⃣ Emit socket event
+    req.io?.emit('bookingUpdated', populatedBooking);
 
     return res.status(200).json({
       success: true,
@@ -572,7 +866,8 @@ export const updateBooking = async (req, res) => {
       data: populatedBooking,
     });
   } catch (error) {
-    console.error('Error updating booking:', error.message);
+    console.error('❌ Error updating booking:', error.message);
+    console.error('Stack:', error.stack);
     return res.status(500).json({ 
       success: false, 
       error: 'Internal server error',

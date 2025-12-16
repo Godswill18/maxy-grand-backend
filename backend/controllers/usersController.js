@@ -18,7 +18,10 @@ export const signUp = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid email format" });
     }
 
-    const existingEmail = await User.findOne({ email });
+    // ✅ FIX: Convert email to lowercase for consistency
+    const lowerEmail = email.toLowerCase();
+
+    const existingEmail = await User.findOne({ email: lowerEmail });
     if (existingEmail) {
       return res.status(400).json({ success: false, message: "Email already exists" });
     }
@@ -32,21 +35,19 @@ export const signUp = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password must be at least 4 characters long" });
     }
 
-    // Hash the password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
+    // ✅ FIX: DON'T hash password here! Let pre-save hook do it.
+    // This prevents double-hashing which breaks bcrypt.compare()
     const newUser = new User({
       firstName,
       lastName,
-      email,
+      email: lowerEmail,
       phoneNumber,
-      password: hashedPassword,
+      password: password,  // ✅ Plain text - pre-save hook will hash it
       role,
       hotelId
     });
 
-    await newUser.save();
+    await newUser.save();  // ← Pre-save hook automatically hashes password
     const token = generateTokenAndSetCookie(newUser._id);
 
     // Emit socket event for new user creation (if socket is available on the request)
@@ -80,7 +81,6 @@ export const signUp = async (req, res) => {
         phoneNumber: newUser.phoneNumber,
         role: newUser.role,
         hotelId: newUser.hotelId,
-        // profileImg: newUser.profileImg,
         token,
       },
     });
@@ -245,40 +245,108 @@ export const login = async (req, res) => {
 //   }
 // };
 
+
 export const loginGuest = async (req, res) => {
-     try {
+  try {
     const { email, password } = req.body;
 
     // Validate input
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Please provide both email and password" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Please provide both email and password" 
+      });
     }
+
+    // Convert email to lowercase
+    const lowerEmail = email.toLowerCase();
+    console.log(`🔍 Login attempt for email: ${lowerEmail}`);
 
     // Find user by email
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: lowerEmail });
     if (!user) {
-      return res.status(400).json({ success: false, message: "Invalid email or password" });
+      console.log(`❌ User not found: ${lowerEmail}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email or password" 
+      });
     }
 
-    // Check password
-    const isPasswordCorrect = await bcrypt.compare(password, user.password);
-    if (!isPasswordCorrect) {
-      return res.status(400).json({ success: false, message: "Invalid email or password" });
+    console.log(`✅ User found: ${lowerEmail}`);
+    console.log(`   Stored password hash: ${user.password.substring(0, 50)}...`);
+    console.log(`   Password hash length: ${user.password.length}`);
+    console.log(`   Entered password: ${password}`);
+    console.log(`   Entered password length: ${password.length}`);
+
+    // Validate password field exists
+    if (!user.password) {
+      console.error(`❌ No password stored for user ${lowerEmail}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email or password" 
+      });
     }
+
+    // Validate password is hashed
+    if (!user.password.startsWith('$2')) {
+      console.error(`❌ Password not hashed for user ${lowerEmail}. Password: ${user.password.substring(0, 30)}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Account authentication issue. Please contact support." 
+      });
+    }
+
+    // Compare password with proper error handling
+    let isPasswordCorrect = false;
+    try {
+      isPasswordCorrect = await bcrypt.compare(password, user.password);
+      console.log(`🔐 Bcrypt.compare result: ${isPasswordCorrect}`);
+    } catch (bcryptError) {
+      console.error(`❌ Bcrypt compare error for user ${lowerEmail}:`, bcryptError.message);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email or password" 
+      });
+    }
+
+    // Check password result
+    if (!isPasswordCorrect) {
+      console.log(`❌ Password mismatch for user ${lowerEmail}`);
+      console.log(`   This means the password entered doesn't match the stored hash`);
+      console.log(`   Stored hash starts with: ${user.password.substring(0, 20)}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email or password" 
+      });
+    }
+
+    console.log(`✅ Password correct for user ${lowerEmail}`);
+
+    // Check if user is a guest
+    // if (user.role !== 'guest') {
+    //   console.log(`❌ User ${lowerEmail} is not a guest. Role: ${user.role}`);
+    //   return res.status(403).json({ 
+    //     success: false, 
+    //     message: "Only guests can login here. Please use the staff login page." 
+    //   });
+    // }
+
+    console.log(`✅ User is a guest. Generating token...`);
 
     // Generate token and set cookie
     const token = generateTokenAndSetCookie(user._id, res);
 
-    // Return user data without sensitive information
+    // Return user data
     const userData = {
       _id: user._id,
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
+      phoneNumber: user.phoneNumber,
       role: user.role,
-      hotelId: user.hotelId,
-      // phoneNumber: user.phoneNumber,
     };
+
+    console.log(`✅ Login successful for ${lowerEmail}`);
 
     res.status(200).json({
       success: true,
@@ -287,11 +355,13 @@ export const loginGuest = async (req, res) => {
       token,
     });
   } catch (error) {
-    console.error("Error in login controller:", error.message);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    console.error("❌ Error in loginGuest controller:", error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error" 
+    });
   }
-
-}
+};
 
 export const getAdmins = async (req, res) => {
   try {
@@ -572,13 +642,22 @@ export const findUserByEmail = async (req, res) => {
         const { email } = req.query;
 
         if (!email) {
-            return res.status(400).json({ success: false, error: "Email query parameter is required." });
+            return res.status(400).json({ 
+              success: false, 
+              error: "Email query parameter is required." 
+            });
         }
 
-        const user = await User.findOne({ email });
+        // ✅ FIX: Convert email to lowercase for consistency
+        const lowerEmail = email.toLowerCase();
+        
+        const user = await User.findOne({ email: lowerEmail });
 
         if (!user) {
-            return res.status(404).json({ success: false, error: "User not found." });
+            return res.status(404).json({ 
+              success: false, 
+              error: "User not found." 
+            });
         }
 
         // Return only necessary public fields (excluding password, roles, etc.)
@@ -595,7 +674,10 @@ export const findUserByEmail = async (req, res) => {
 
     } catch (error) {
         console.error("Error finding user by email:", error);
-        return res.status(500).json({ success: false, error: "Server error during user lookup." });
+        return res.status(500).json({ 
+          success: false, 
+          error: "Server error during user lookup." 
+        });
     }
 };
 
@@ -607,7 +689,7 @@ export const findUserByEmail = async (req, res) => {
 export const createGuestAccount = async (req, res) => {
   try {
     const { firstName, lastName, email, phoneNumber, password } = req.body;
-    const hotelId = req.user?.hotelId; // Get from authenticated receptionist
+    // const hotelId = req.user?.hotelId; // Get from authenticated receptionist
 
     // Validate required fields
     if (!firstName || !lastName || !email || !phoneNumber || !password) {
@@ -633,9 +715,10 @@ export const createGuestAccount = async (req, res) => {
       });
     }
 
-    // Hash password (assuming you have bcrypt installed)
-    const bcrypt = await import('bcryptjs');
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ✅ FIXED: Use the top-level bcrypt import (already imported at the top of the file)
+    // Hash password - same way as signUp does it
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create new guest user
     const newUser = new User({
@@ -645,7 +728,7 @@ export const createGuestAccount = async (req, res) => {
       phoneNumber,
       password: hashedPassword,
       role: 'guest',
-      hotelId: hotelId || null, // Link to hotel if available
+      // hotelId: hotelId || null, // Link to hotel if available
       isActive: true // Guests are automatically active
     });
 
@@ -674,7 +757,6 @@ export const createGuestAccount = async (req, res) => {
     });
   }
 };
-
 
 // ✅ NEW: Update user profile (account number, bank name)
 export const updateUserProfile = async (req, res) => {

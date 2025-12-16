@@ -15,7 +15,8 @@ import {
    getMyHotelRooms, // NEW
   updateRoomStatus, // NEW
   getRoomStatusByHotel,
-  getAllRoomsInHotel
+  getAllRoomsInHotel,
+  getAvailableRoomsRange
 } from '../controllers/roomsController.js';
 import roomsImages from '../config/roomsMulter.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
@@ -93,6 +94,10 @@ router.patch('/:id/status', protectedRoute, isStaffOrAdmin, updateRoomStatus);
 router.patch('/:id', protectedRoute, isStaffOrAdmin, updateRoomStatus);
 
 router.get('/available', protectedRoute, getAvailableRooms);
+
+router.get('/available_rooms', protectedRoute, getAvailableRoomsRange);
+
+
 
 
 export default router;

@@ -25,7 +25,7 @@ router.get('/hotel-summary/:hotelId', protectedRoute, adminAndSuperAdminMiddlewa
 
 // Create bookings
 router.post('/create-with-payment', protectedRoute, createBookingWithPayment);
-router.post('/create', protectedRoute, createBooking);
+router.post('/create-walkin', protectedRoute, isStaffOrAdmin, createBooking);
 
 // Get all bookings (Admin/Receptionist)
 router.get('/all', protectedRoute, isStaffOrAdmin, getAllBookings);

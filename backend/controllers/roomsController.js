@@ -2,6 +2,7 @@ import RoomType from "../models/roomTypeModel.js";
 import Room from "../models/roomModel.js"; 
 import fs from "fs";
 import path from "path";
+import Booking from "../models/bookingModel.js";
 
 export const createRoom = async (req, res) => {
   try {
@@ -623,3 +624,109 @@ export const getRoomById = async (req, res) => {
         return res.status(500).json({ success: false, error: "Internal server error" });
     }
 }
+
+export const getAvailableRoomsRange = async (req, res) => {
+  try {
+    const { checkIn, checkOut } = req.query;
+    const hotelId = req.user?.hotelId; // Get from authenticated user
+
+    console.log('📅 Fetching available rooms:', { checkIn, checkOut, hotelId });
+
+    // Validate inputs
+    if (!checkIn || !checkOut) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-in and check-out dates are required' 
+      });
+    }
+
+    if (!hotelId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User is not associated with a hotel' 
+      });
+    }
+
+    // Validate dates
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    
+    if (checkOutDate <= checkInDate) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Check-out date must be after check-in date' 
+      });
+    }
+
+    // 1. Find all room TYPES in this hotel (since each RoomType = one Room in this system)
+    const allRoomTypes = await RoomType.find({ 
+      hotelId: hotelId,
+      isAvailable: true
+    }).sort({ roomNumber: 1 });
+
+    console.log(`📊 Found ${allRoomTypes.length} room types in hotel`);
+
+    if (allRoomTypes.length === 0) {
+      return res.status(200).json({ 
+        success: true, 
+        data: [],
+        message: 'No rooms found in this hotel'
+      });
+    }
+
+    // 2. Find all conflicting bookings for these dates
+    const conflictingBookings = await Booking.find({
+      hotelId: hotelId,
+      bookingStatus: { $in: ['confirmed', 'checked-in'] }, // Only check active bookings
+      $and: [
+        { checkInDate: { $lt: checkOutDate } },
+        { checkOutDate: { $gt: checkInDate } }
+      ]
+    }).select('roomTypeId');
+
+    console.log(`🚫 Found ${conflictingBookings.length} conflicting bookings`);
+
+    // 3. Get array of room TYPE IDs that are booked
+    const bookedRoomTypeIds = conflictingBookings
+      .map(booking => booking.roomTypeId ? booking.roomTypeId.toString() : null)
+      .filter(id => id !== null); // Filter out null values
+
+    console.log(`🔒 Booked room type IDs:`, bookedRoomTypeIds);
+
+    // 4. Filter out booked room types
+    const availableRoomTypes = allRoomTypes.filter(roomType => 
+      !bookedRoomTypeIds.includes(roomType._id.toString())
+    );
+
+    console.log(`✅ Available room types: ${availableRoomTypes.length}`);
+
+    // 5. Format response to match expected structure
+    const formattedRooms = availableRoomTypes.map(roomType => ({
+      _id: roomType._id,
+      roomNumber: roomType.roomNumber,
+      roomTypeId: {
+        _id: roomType._id,
+        name: roomType.name,
+        price: roomType.price,
+        description: roomType.description,
+        capacity: roomType.capacity,
+        amenities: roomType.amenities
+      }
+    }));
+
+    return res.status(200).json({ 
+      success: true, 
+      data: formattedRooms,
+      message: `${formattedRooms.length} room(s) available for selected dates`
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching available rooms:', error.message);
+    console.error('Stack:', error.stack);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+};

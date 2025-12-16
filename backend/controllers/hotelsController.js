@@ -1,5 +1,6 @@
 import Hotel from "../models/hotelModel.js";
 import RoomType from "../models/roomTypeModel.js"; // ✅ Add this
+import User from '../models/userModel.js';
 import fs from "fs";
 import path from "path";
 
@@ -65,68 +66,106 @@ export const createHotelBranch = async (req, res) => {
 
 
 export const updateBranch = async (req, res) => {
-
-    try{
-     // Ensure user is authenticated and attached to req.user
-    // const user = req.user;
-
-    // if (!user || user.role !== "superadmin") {
-    //   return res
-    //     .status(403)
-    //     .json({ success: false, error: "Forbidden — Super Admin access required" });
-    // }
-
+  try {
     const branchId = req.params.id;
     const { name, city, address, phoneNumber, manager, roomCount, staffCount, isActive } = req.body;
 
-    // Build update object only with provided values to avoid overwriting fields with undefined
+    // Build update object only with provided values
     const updateData = {};
     if (typeof name !== 'undefined') updateData.name = name;
     if (typeof city !== 'undefined') updateData.city = city;
     if (typeof address !== 'undefined') updateData.address = address;
     if (typeof phoneNumber !== 'undefined') updateData.phoneNumber = phoneNumber;
 
-    // Manager can be an ObjectId, null (to unset), or omitted.
+    // Handle manager assignment
+    let managerChanged = false;
+    let newManagerId = null;
+
     if (typeof manager !== 'undefined') {
-        // Treat empty string as explicit unset
-        if (manager === '' || manager === null) {
-            updateData.manager = null;
-        } else {
-            updateData.manager = manager;
-        }
+      managerChanged = true;
+      // Treat empty string as explicit unset
+      if (manager === '' || manager === null) {
+        updateData.manager = null;
+        newManagerId = null;
+      } else {
+        updateData.manager = manager;
+        newManagerId = manager;
+      }
     }
 
     if (typeof roomCount !== 'undefined') {
-        const rc = Number(roomCount);
-        if (!Number.isNaN(rc)) updateData.roomCount = rc;
+      const rc = Number(roomCount);
+      if (!Number.isNaN(rc)) updateData.roomCount = rc;
     }
+    
     if (typeof staffCount !== 'undefined') {
-        const sc = Number(staffCount);
-        if (!Number.isNaN(sc)) updateData.staffCount = sc;
+      const sc = Number(staffCount);
+      if (!Number.isNaN(sc)) updateData.staffCount = sc;
     }
 
     if (typeof isActive !== 'undefined') updateData.isActive = isActive;
 
     if (Object.keys(updateData).length === 0) {
-        return res.status(400).json({ success: false, message: 'No valid fields provided for update' });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No valid fields provided for update' 
+      });
     }
 
+    // First, update the branch
     const updatedBranch = await Hotel.findByIdAndUpdate(branchId, updateData, { new: true });
-    if(!updatedBranch){
-        return res.status(404).json({ success: false, error: "Hotel branch not found" });
+    
+    if (!updatedBranch) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Hotel branch not found" 
+      });
+    }
+
+    // ✅ NEW: If manager was assigned/changed, update the user's hotelId
+    if (managerChanged && newManagerId) {
+      try {
+        const updatedUser = await User.findByIdAndUpdate(
+          newManagerId,
+          { hotelId: branchId },
+          { new: true, runValidators: true }
+        ).select('-password');
+
+        if (!updatedUser) {
+          console.warn(`Manager user ${newManagerId} not found`);
+          // Don't fail the branch update if user not found
+        } else {
+          console.log(`✅ Updated user ${updatedUser._id} with hotelId: ${branchId}`);
+        }
+      } catch (userUpdateError) {
+        console.error('Error updating user hotelId:', userUpdateError.message);
+        // Don't fail the branch update if user update fails
+        // But log the error for debugging
+      }
+    }
+
+    // ✅ NEW: If manager was removed (set to null), we could optionally unset the user's hotelId
+    // This is optional - you might want to keep their hotelId for history
+    if (managerChanged && newManagerId === null) {
+      // Optional: Find the previous manager and unset their hotelId
+      // For now, we'll skip this to preserve history
+      console.log('Manager was removed from branch');
     }
 
     return res.status(200).json({
-        success: true,
-        message: "Hotel branch updated successfully",
-        data: updatedBranch
+      success: true,
+      message: "Hotel branch updated successfully",
+      data: updatedBranch
     });
 
-    }catch(error){
-        console.error("Error in updateBranch:", error.message);
-        return res.status(500).json({ success: false, error: "Internal server error" });
-    }
-}
+  } catch (error) {
+    console.error("Error in updateBranch:", error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: "Internal server error" 
+    });
+  }
+};
 
 export const getActiveHotelBranch = async (req, res) => {
 

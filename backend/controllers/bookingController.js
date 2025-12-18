@@ -512,19 +512,21 @@ export const createBooking = async (req, res) => {
       checkOutDate,
       bookingType,
       totalAmount,
-      amountPaid,
+      amountPaid,  // ✅ NEW: Accept payment amount
       guestDetails,
       preferences,
       numberOfGuests,
       specialRequests,
-      guestId: requestGuestId, // ✅ NEW: Accept guestId from request
+      guestId: requestGuestId,
     } = req.body;
 
-    console.log('📝 Creating booking with data:', {
+    console.log('📝 Creating booking with payment data:', {
       roomTypeId,
       guestName,
       bookingType,
-      requestGuestId, // ✅ Log the guestId from request
+      totalAmount,
+      amountPaid,  // ✅ Log payment amount
+      requestGuestId,
       hotelId: req.body.hotelId,
     });
 
@@ -547,6 +549,35 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ 
         success: false, 
         error: 'Check-in and check-out dates are required' 
+      });
+    }
+
+    // ✅ NEW: Validate payment amounts
+    if (totalAmount && typeof totalAmount !== 'number') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Total amount must be a number' 
+      });
+    }
+
+    if (amountPaid && typeof amountPaid !== 'number') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Amount paid must be a number' 
+      });
+    }
+
+    if (amountPaid && amountPaid < 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Amount paid cannot be negative' 
+      });
+    }
+
+    if (totalAmount && amountPaid && amountPaid > totalAmount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Amount paid cannot exceed total amount' 
       });
     }
 
@@ -588,17 +619,30 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // 4️⃣ ✅ FIXED: Determine guestId
-    // Use requestGuestId if provided (from verified guest or newly created user)
-    // Otherwise, use user._id if online booking, null if walk-in
+    // 4️⃣ Determine guestId
     const guestId = requestGuestId || (bookingType === 'online' ? user._id : null);
-    
     console.log('👤 Guest ID set to:', guestId, '| Booking type:', bookingType);
 
-    // 5️⃣ Determine payment status
+    // 5️⃣ ✅ UPDATED: Calculate payment status based on amount paid
+    const finalTotalAmount = totalAmount || 0;
+    const finalAmountPaid = amountPaid || 0;
+    
     let paymentStatus = 'pending';
-    if (amountPaid >= totalAmount) paymentStatus = 'paid';
-    else if (amountPaid > 0) paymentStatus = 'partial';
+    if (finalAmountPaid >= finalTotalAmount && finalTotalAmount > 0) {
+      paymentStatus = 'paid';
+    } else if (finalAmountPaid > 0) {
+      paymentStatus = 'partial';
+    }
+
+    // ✅ Calculate outstanding amount
+    const outstandingAmount = finalTotalAmount - finalAmountPaid;
+
+    console.log('💰 Payment breakdown:', {
+      totalAmount: finalTotalAmount,
+      amountPaid: finalAmountPaid,
+      outstanding: outstandingAmount,
+      status: paymentStatus
+    });
 
     // 6️⃣ Generate unique confirmation code
     let confirmationCode = '';
@@ -613,20 +657,20 @@ export const createBooking = async (req, res) => {
 
     console.log('🔐 Generated confirmation code:', confirmationCode);
 
-    // 7️⃣ Create booking record
+    // 7️⃣ ✅ UPDATED: Create booking record with payment tracking
     const booking = new Booking({
       hotelId: req.body.hotelId || user.hotelId,
-      roomTypeId, // Use roomTypeId as provided
-      guestId: guestId, // ✅ Use the properly set guestId
+      roomTypeId,
+      guestId: guestId,
       guestName,
       guestEmail,
       guestPhone,
       checkInDate,
       checkOutDate,
       bookingType,
-      totalAmount,
-      amountPaid,
-      paymentStatus: 'paid',
+      totalAmount: finalTotalAmount,
+      amountPaid: finalAmountPaid,  // ✅ Track amount paid
+      paymentStatus: paymentStatus,  // ✅ Dynamic payment status
       bookingStatus: 'confirmed',
       confirmationCode: confirmationCode,
       guestDetails,
@@ -636,7 +680,13 @@ export const createBooking = async (req, res) => {
     });
 
     const savedBooking = await booking.save();
-    console.log('✅ Booking saved:', savedBooking._id);
+    console.log('✅ Booking saved with payment:', {
+      id: savedBooking._id,
+      totalAmount: savedBooking.totalAmount,
+      amountPaid: savedBooking.amountPaid,
+      paymentStatus: savedBooking.paymentStatus,
+      outstanding: outstandingAmount
+    });
 
     // 8️⃣ Emit socket event
     const populatedBooking = await getPopulatedBooking(savedBooking._id);
@@ -645,7 +695,10 @@ export const createBooking = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: 'Booking created successfully',
-      data: populatedBooking,
+      data: {
+        ...populatedBooking,
+        outstanding: outstandingAmount  // ✅ Include outstanding in response
+      },
     });
 
   } catch (error) {
@@ -658,6 +711,88 @@ export const createBooking = async (req, res) => {
     });
   }
 };
+
+
+export const updateBookingPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amountPaid, paymentNote } = req.body;
+
+    // Validate
+    if (typeof amountPaid !== 'number' || amountPaid < 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid payment amount'
+      });
+    }
+
+    // Find booking
+    const booking = await Booking.findById(id);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        error: 'Booking not found'
+      });
+    }
+
+    // Calculate new total paid
+    const newAmountPaid = (booking.amountPaid || 0) + amountPaid;
+    
+    // Check if exceeds total
+    if (newAmountPaid > booking.totalAmount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment amount exceeds total booking amount'
+      });
+    }
+
+    // Update payment status
+    let paymentStatus = 'pending';
+    if (newAmountPaid >= booking.totalAmount) {
+      paymentStatus = 'paid';
+    } else if (newAmountPaid > 0) {
+      paymentStatus = 'partial';
+    }
+
+    // Update booking
+    booking.amountPaid = newAmountPaid;
+    booking.paymentStatus = paymentStatus;
+    
+    // ✅ Add payment history entry
+    if (!booking.paymentHistory) {
+      booking.paymentHistory = [];
+    }
+    
+    booking.paymentHistory.push({
+      amount: amountPaid,
+      date: new Date(),
+      note: paymentNote || 'Payment received',
+      receivedBy: req.user._id
+    });
+
+    await booking.save();
+
+    const populatedBooking = await getPopulatedBooking(booking._id);
+    req.io?.emit('bookingUpdated', populatedBooking);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment updated successfully',
+      data: {
+        ...populatedBooking,
+        outstanding: booking.totalAmount - newAmountPaid
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating payment:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update payment'
+    });
+  }
+};
+
 /**
  * @desc Get all bookings (Admin/Receptionist)
  * @route GET /api/bookings/all

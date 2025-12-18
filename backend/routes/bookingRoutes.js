@@ -13,7 +13,8 @@ import {
   updateBooking,
   cancelBooking,
   getAllBookingsInHotel,
-  checkRoomAvailability
+  checkRoomAvailability,
+  updateBookingPayment
 } from '../controllers/bookingController.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
 
@@ -34,6 +35,8 @@ router.post('/check-availability', protectedRoute, checkRoomAvailability);
 
 // Get all bookings for a specific user - MUST come before /:id
 router.get('/user/:userId', protectedRoute, getUserBookings);
+
+router.patch('/:id/payment', protectedRoute, isStaffOrAdmin, updateBookingPayment);
 
 // Update/Cancel booking
 router.put('/update/:id', protectedRoute, isStaffOrAdmin, updateBooking);

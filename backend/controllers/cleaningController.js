@@ -491,13 +491,67 @@ export const getMyPendingTasks = async (req, res) => {
 
 export const getCleaningRooms = async (req, res) => {
   try {
-    const hotelId = req.user.hotelId;
-    const rooms = await Room.find({ hotelId, status: 'cleaning' })
+    const userRole = req.user.role;
+    const userHotelId = req.user.hotelId;
+    
+    // Query parameters from frontend
+    const { hotelId, all } = req.query;
+    
+    let hotelFilter = {};
+
+    // Logic for SuperAdmin vs Admin/Staff
+    if (userRole === 'superadmin') {
+      if (all === 'true') {
+        // No filter on hotelId -> Get ALL rooms
+        hotelFilter = {};
+      } else if (hotelId) {
+        // Filter by specific hotel requested by frontend
+        hotelFilter = { hotelId };
+      } else {
+        // Default fallback for superadmin
+        hotelFilter = {};
+      }
+    } else {
+      // Regular Admin/Staff: STRICTLY force their own hotelId
+      hotelFilter = { hotelId: userHotelId };
+    }
+
+    // 1️⃣ Get all rooms with 'cleaning' status
+    const cleaningRooms = await Room.find({ 
+      ...hotelFilter, 
+      status: 'cleaning' 
+    })
       .populate('roomTypeId', 'name')
+      .populate('hotelId', 'name') // ✅ Populate hotel name
       .sort({ roomNumber: 1 });
-    res.status(200).json(rooms);
+
+    // 2️⃣ Get all cleaning requests (pending or in-progress) to filter out assigned rooms
+    const assignedCleaningRequests = await CleaningRequest.find({
+      ...hotelFilter,
+      status: { $in: ['pending', 'in-progress'] }
+    }).select('roomId'); // Only get the roomId field
+
+    // 3️⃣ Extract room IDs that are already assigned
+    const assignedRoomIds = assignedCleaningRequests.map(req => req.roomId.toString());
+
+    // 4️⃣ Filter out rooms that have been assigned
+    const unassignedCleaningRooms = cleaningRooms.filter(
+      room => !assignedRoomIds.includes(room._id.toString())
+    );
+
+    console.log('📊 Cleaning Rooms Stats:', {
+      totalCleaningRooms: cleaningRooms.length,
+      assignedRooms: assignedRoomIds.length,
+      unassignedRooms: unassignedCleaningRooms.length,
+    });
+
+    res.status(200).json(unassignedCleaningRooms);
   } catch (error) {
-    res.status(500).json({ message: 'Server error fetching cleaning rooms', error: error.message });
+    console.error('❌ Error fetching cleaning rooms:', error);
+    res.status(500).json({ 
+      message: 'Server error fetching cleaning rooms', 
+      error: error.message 
+    });
   }
 };
 

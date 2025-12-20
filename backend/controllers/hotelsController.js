@@ -68,7 +68,9 @@ export const createHotelBranch = async (req, res) => {
 export const updateBranch = async (req, res) => {
   try {
     const branchId = req.params.id;
-    const { name, city, address, phoneNumber, manager, roomCount, staffCount, isActive } = req.body;
+    const { name, city, address, phoneNumber, manager, 
+      // roomCount, staffCount, 
+      isActive } = req.body;
 
     // Build update object only with provided values
     const updateData = {};
@@ -93,15 +95,15 @@ export const updateBranch = async (req, res) => {
       }
     }
 
-    if (typeof roomCount !== 'undefined') {
-      const rc = Number(roomCount);
-      if (!Number.isNaN(rc)) updateData.roomCount = rc;
-    }
+    // if (typeof roomCount !== 'undefined') {
+    //   const rc = Number(roomCount);
+    //   if (!Number.isNaN(rc)) updateData.roomCount = rc;
+    // }
     
-    if (typeof staffCount !== 'undefined') {
-      const sc = Number(staffCount);
-      if (!Number.isNaN(sc)) updateData.staffCount = sc;
-    }
+    // if (typeof staffCount !== 'undefined') {
+    //   const sc = Number(staffCount);
+    //   if (!Number.isNaN(sc)) updateData.staffCount = sc;
+    // }
 
     if (typeof isActive !== 'undefined') updateData.isActive = isActive;
 

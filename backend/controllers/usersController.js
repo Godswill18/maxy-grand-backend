@@ -404,7 +404,7 @@ export const getUser = async (req, res) => {
 export const getAllStaff = async (req, res) => {
     try{
         // Find users with roles other than 'guest' and 'superadmin'
-        const staffRoles = ['receptionist', 'cleaner', 'waiter', 'admin'];
+        const staffRoles = ['receptionist', 'cleaner', 'waiter', 'headWaiter','admin'];
         const staffMembers = await User.find({ role: { $in: staffRoles } }).select('-password').populate('hotelId', 'name location');
         res.status(200).json({ success: true, data: staffMembers });
     }catch(error){

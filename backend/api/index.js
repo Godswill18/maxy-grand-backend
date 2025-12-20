@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import connectDB from '../DB/connectMongoDB.js';
 import logger from '../middleware/logEvents.js';
 import corsOptions from '../config/corsOptions.js';
+import { setupSocketIO } from '../config/socketConfig.js';
 import hotelBranchRoutes from '../routes/hotelRoutes.js';
 import usersRoutes from '../routes/usersRoutes.js';
 import roomsRoutes from '../routes/roomsRoutes.js';
@@ -30,6 +31,7 @@ import waiterDashRoutes from '../routes/waiterDashRoutes.js';
 import paymentRoutes from '../routes/paymentRoutes.js';
 import shiftRoutes from '../routes/shiftRoutes.js';
 import blogsRoutes from '../routes/blogRoutes.js';
+import notificationRoutes from '../routes/notificationRoutes.js';
 import { setupShiftCronJobs } from '../cron/shiftCronJobs.js';
 
 
@@ -53,7 +55,14 @@ const io = new Server(server, {
     origin: [corsOptions.origin], // Your frontend URL
     credentials: true,
   },
+
+   // ✅ Add connection options
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
+
+// ✅ Setup Socket.IO with enhanced configuration
+setupSocketIO(io);
 
 // ✅ This parses incoming JSON requests
 app.use(express.json());
@@ -109,6 +118,7 @@ app.use('/api/waiter-dashboard', waiterDashRoutes); // waiter dashboard routes
 app.use('/api/payments', paymentRoutes); // payment routes
 app.use('/api/shifts', shiftRoutes); // shift routes
 app.use('/api/blogs', blogsRoutes); // blog routes
+app.use('/api/notifications', notificationRoutes);
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

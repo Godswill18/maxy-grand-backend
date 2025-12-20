@@ -229,13 +229,27 @@ export const deleteMenuItem = async (req, res) => {
 // 📖 GET Available Menu
 export const getAvailableMenu = async (req, res) => {
   try {
-    const { category } = req.query; // e.g., /api/menu?category=bar
+    const { category, location } = req.query; // ✅ Accept location query param
+    
     const filter = { isAvailable: true };
+    
+    // Filter by category if provided
     if (category) {
       filter.category = category;
     }
     
-    const items = await MenuItem.find(filter).sort({ name: 1 });
+    // ✅ Fetch items and populate hotel data
+    let items = await MenuItem.find(filter)
+      .populate('hotelId', 'name location') // ✅ Populate hotel with name and location
+      .sort({ name: 1 });
+    
+    // ✅ Filter by location if provided (after population)
+    if (location && location !== 'all') {
+      items = items.filter(item => 
+        item.hotelId && item.hotelId.location === location
+      );
+    }
+    
     return res.status(200).json({ success: true, data: items });
   } catch (error) {
     console.error("Error in getAvailableMenu:", error.message);
@@ -246,7 +260,10 @@ export const getAvailableMenu = async (req, res) => {
 // 🧑‍💼 GET All Menu Items (for Staff)
 export const getAllMenuItems = async (req, res) => {
   try {
-    const items = await MenuItem.find().sort({ category: 1, name: 1 });
+    const items = await MenuItem.find()
+      .populate('hotelId', 'name location') // ✅ Populate hotel data
+      .sort({ category: 1, name: 1 });
+    
     return res.status(200).json({ success: true, data: items });
   } catch (error) {
     console.error("Error in getAllMenuItems:", error.message);

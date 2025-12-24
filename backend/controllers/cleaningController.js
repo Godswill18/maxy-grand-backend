@@ -117,84 +117,119 @@ export const completeCleaningTask = async (req, res) => {
     const cleanerId = req.user.id;
     const hotelId = req.user.hotelId;
     const io = req.io;
+
     if (!mongoose.Types.ObjectId.isValid(requestId)) {
       return res.status(400).json({ message: 'Invalid request ID' });
     }
-    const request = await CleaningRequest.findOne({ _id: requestId, hotelId }); // Add hotelId check
+
+    const request = await CleaningRequest.findOne({ _id: requestId, hotelId });
+    
     if (!request) {
       return res.status(404).json({ message: 'Cleaning request not found' });
     }
+
     if (request.assignedCleaner.toString() !== cleanerId) {
       return res.status(403).json({ message: 'Not authorized to complete this task' });
     }
+
     if (request.status !== 'in-progress') {
       return res.status(400).json({ message: 'Task must be in progress to complete' });
     }
+
+    // Mark request as completed
     request.status = 'completed';
     request.finishTime = new Date();
+    
     if (request.startTime) {
       const durationMinutes = Math.round((request.finishTime.getTime() - request.startTime.getTime()) / 60000);
       request.actualDuration = durationMinutes;
     }
+
     const updatedRequest = await request.save();
-    await Room.findByIdAndUpdate(request.roomId, { status: 'available' });
+
+    // ✅ FIX: Check room status BEFORE updating
+    const room = await Room.findById(request.roomId);
+    
+    if (room) {
+      // ✅ If room was 'occupied-needs-cleaning', return to 'occupied' (guest still there)
+      // ✅ If room was 'cleaning', set to 'available' (post-checkout cleaning)
+      if (room.status === 'occupied-needs-cleaning') {
+        await Room.findByIdAndUpdate(request.roomId, { status: 'occupied' });
+        console.log(`✅ Room ${room.roomNumber} status: occupied-needs-cleaning → occupied`);
+      } else if (room.status === 'cleaning') {
+        await Room.findByIdAndUpdate(request.roomId, { status: 'available' });
+        console.log(`✅ Room ${room.roomNumber} status: cleaning → available`);
+      }
+    }
+
     await emitUpdatedTasks(io, hotelId);
-    res.status(200).json({ message: 'Task marked as complete', request: updatedRequest });
+
+    res.status(200).json({ 
+      success: true,
+      message: 'Task marked as complete', 
+      request: updatedRequest 
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Server error completing task', error: error.message });
+    console.error('Error completing task:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error completing task', 
+      error: error.message 
+    });
   }
 };
 
-export const createGuestCleaningRequest = async (req, res) => {
-  try {
-    const { roomId, notes, priority = 'Medium' } = req.body;
-    const requestedById = req.user.id;
-    const hotelId = req.user.hotelId;
-    const io = req.io;
 
-    if (!roomId) {
-      return res.status(400).json({ message: 'Room ID is required' });
-    }
+// export const createGuestCleaningRequest = async (req, res) => {
+//   try {
+//     const { roomId, notes, priority = 'Medium' } = req.body;
+//     const requestedById = req.user.id;
+//     const hotelId = req.user.hotelId;
+//     const io = req.io;
 
-    const room = await Room.findById(roomId);
-    if (!room) {
-      return res.status(404).json({ message: 'Room not found' });
-    }
+//     if (!roomId) {
+//       return res.status(400).json({ message: 'Room ID is required' });
+//     }
 
-    // Check for existing pending request
-    const existingRequest = await CleaningRequest.findOne({
-      roomId,
-      status: { $in: ['pending', 'in-progress'] },
-      hotelId
-    });
+//     const room = await Room.findById(roomId);
+//     if (!room) {
+//       return res.status(404).json({ message: 'Room not found' });
+//     }
+
+//     // Check for existing pending request
+//     const existingRequest = await CleaningRequest.findOne({
+//       roomId,
+//       status: { $in: ['pending', 'in-progress'] },
+//       hotelId
+//     });
     
-    if (existingRequest) {
-      return res.status(400).json({
-        message: 'A cleaning request already exists for this room.'
-      });
-    }
+//     if (existingRequest) {
+//       return res.status(400).json({
+//         message: 'A cleaning request already exists for this room.'
+//       });
+//     }
 
-    // Create request WITHOUT assigning cleaner
-    const request = new CleaningRequest({
-      hotelId,
-      roomId,
-      requestedBy: requestedById,
-      notes,
-      priority,
-      estimatedDuration: '30 min',
-      status: 'pending',
-      // assignedCleaner will be null until a cleaner accepts
-    });
+//     // Create request WITHOUT assigning cleaner
+//     const request = new CleaningRequest({
+//       hotelId,
+//       roomId,
+//       requestedBy: requestedById,
+//       notes,
+//       priority,
+//       estimatedDuration: '30 min',
+//       status: 'pending',
+//       // assignedCleaner will be null until a cleaner accepts
+//     });
 
-    const createdRequest = await request.save();
-    await Room.findByIdAndUpdate(roomId, { status: 'cleaning' });
-    await emitUpdatedTasks(io, hotelId);
+//     const createdRequest = await request.save();
+//     await Room.findByIdAndUpdate(roomId, { status: 'cleaning' });
+//     await emitUpdatedTasks(io, hotelId);
     
-    res.status(201).json(createdRequest);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error creating request', error: error.message });
-  }
-};
+//     res.status(201).json(createdRequest);
+//   } catch (error) {
+//     res.status(500).json({ message: 'Server error creating request', error: error.message });
+//   }
+// };
 
 // Get all unassigned cleaning requests (for cleaners to see available tasks)
 export const getUnassignedRequests = async (req, res) => {
@@ -252,10 +287,10 @@ export const acceptCleaningRequest = async (req, res) => {
       return res.status(400).json({ message: 'This request is no longer available' });
     }
 
-    // Assign the cleaner and start the task
+    // ✅ FIX: Only assign the cleaner, keep status as 'pending'
+    // Cleaner must then call /start endpoint to change status to 'in-progress'
     request.assignedCleaner = cleanerId;
-    request.status = 'in-progress';
-    request.startTime = new Date();
+    // Status stays 'pending' - cleaner hasn't started yet
 
     const updatedRequest = await request.save();
     await emitUpdatedTasks(io, hotelId);
@@ -274,13 +309,20 @@ export const acceptCleaningRequest = async (req, res) => {
       .populate('requestedBy', 'firstName lastName');
 
     res.status(200).json({ 
-      message: 'Request accepted and started', 
+      success: true,
+      message: 'Request accepted successfully. Start the task when ready.', 
       request: populatedRequest 
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error accepting request', error: error.message });
+    console.error('Error accepting request:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error accepting request', 
+      error: error.message 
+    });
   }
 };
+
 // export const getMyTasks = async (req, res) => { // Renamed and updated query
 //   try {
 //     const cleanerId = req.user.id;
@@ -1168,3 +1210,120 @@ export const getHotelCleaningRequests = async (req, res) => {
   }
 };
 
+// Check if a room has a pending cleaning request (for guests to check before showing button)
+export const checkPendingCleaningRequest = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    // ✅ FIX: Get room with hotelId
+    const room = await Room.findById(roomId).populate('hotelId');
+    
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        message: 'Room not found'
+      });
+    }
+
+    // ✅ Get hotelId from room
+    const hotelId = room.hotelId?._id || room.hotelId;
+
+    // ✅ UPDATED: Populate assignedCleaner to check if assigned
+    const pendingRequest = await CleaningRequest.findOne({
+      roomId,
+      hotelId,
+      status: { $in: ['pending', 'in-progress'] }
+    })
+    .populate('assignedCleaner', 'firstName lastName') // ✅ Populate to check assignment
+    .populate('requestedBy', 'firstName lastName')
+    .select('status assignedCleaner requestedBy priority notes createdAt startTime'); // ✅ Return more details
+
+    res.status(200).json({
+      success: true,
+      hasPendingRequest: !!pendingRequest,
+      request: pendingRequest || null // ✅ Return full request details
+    });
+  } catch (error) {
+    console.error('Error checking pending request:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error checking pending request', 
+      error: error.message 
+    });
+  }
+};
+
+// ✅ FIXED: createGuestCleaningRequest - Gets hotelId from room
+
+export const createGuestCleaningRequest = async (req, res) => {
+  try {
+    const { roomId, notes, priority = 'Medium' } = req.body;
+    const requestedById = req.user.id;
+    const io = req.io;
+
+    if (!roomId) {
+      return res.status(400).json({ message: 'Room ID is required' });
+    }
+
+    // ✅ FIX: Populate room with hotelId to get the hotel information
+    const room = await Room.findById(roomId).populate('hotelId');
+    
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    // ✅ FIX: Get hotelId from the room (not from req.user.hotelId)
+    const hotelId = room.hotelId?._id || room.hotelId;
+
+    if (!hotelId) {
+      return res.status(400).json({ message: 'Hotel information not found for this room' });
+    }
+
+    // Check for existing pending/in-progress request
+    const existingRequest = await CleaningRequest.findOne({
+      roomId,
+      status: { $in: ['pending', 'in-progress'] },
+      hotelId
+    });
+    
+    if (existingRequest) {
+      return res.status(400).json({
+        message: 'A cleaning request already exists for this room.'
+      });
+    }
+
+    // Create request WITHOUT assigning cleaner
+    const request = new CleaningRequest({
+      hotelId, // ✅ Now using hotelId from room
+      roomId,
+      requestedBy: requestedById,
+      notes: notes || 'Guest requested housekeeping service',
+      priority,
+      estimatedDuration: '30 min',
+      status: 'pending',
+    });
+
+    const createdRequest = await request.save();
+    
+    // ✅ Set room status to 'occupied-needs-cleaning' for checked-in guests
+    await Room.findByIdAndUpdate(roomId, { 
+      status: 'occupied-needs-cleaning'
+    });
+    
+    // ✅ Emit to hotel staff
+    await emitUpdatedTasks(io, hotelId);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Housekeeping request submitted successfully',
+      data: createdRequest
+    });
+  } catch (error) {
+    console.error('Guest cleaning request error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error creating request', 
+      error: error.message 
+    });
+  }
+};

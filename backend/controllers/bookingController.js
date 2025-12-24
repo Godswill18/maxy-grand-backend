@@ -16,7 +16,8 @@ const getPopulatedBooking = async (id) => {
         select: 'roomNumber price name amenities description', // Just get the room number
     
     })
-    .populate('guestId', 'firstName lastName email');
+    .populate('guestId', 'firstName lastName email')
+    .populate('roomId', 'roomNumber status');
 };
 
 
@@ -1221,8 +1222,7 @@ const objectId = new mongoose.Types.ObjectId(userId);
       .populate({
         path: 'roomTypeId',
         select: 'name price images amenities roomNumber', // RoomType fields
-      })
-      .sort({ createdAt: -1 }); // Newest first
+      }).sort({ createdAt: -1 }); // Newest first
 
     console.log('Found bookings:', bookings.length); // Debug log
 

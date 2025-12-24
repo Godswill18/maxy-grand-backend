@@ -20,6 +20,15 @@ import {
   verifyResetOTP,
   resetPassword
 } from '../controllers/usersController.js';
+
+// ✅ Import new guest profile controllers
+import {
+  updateGuestPhoneNumber,
+  requestGuestEmailChange,
+  verifyGuestEmailChangeOTP,
+  confirmGuestEmailChange
+} from '../controllers/guestProfileController.js';
+
 import { adminAndSuperAdminMiddleware, superAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -44,12 +53,18 @@ router.put("/update-staff-role/:id", protectedRoute, adminAndSuperAdminMiddlewar
 router.get('/find-by-email', protectedRoute, findUserByEmail);
 router.post('/create-guest-account', protectedRoute, createGuestAccount);
 
-// ✅ NEW: Profile Routes (Protected - for logged-in users)
+// ✅ Staff Profile Routes (Protected)
 router.put('/update-profile', protectedRoute, updateUserProfile);
 
-// ✅ NEW: Password Reset Routes (Protected)
+// ✅ Password Reset Routes (Protected - for both staff and guests)
 router.post('/request-password-reset', protectedRoute, requestPasswordReset);
 router.post('/verify-reset-otp', protectedRoute, verifyResetOTP);
 router.post('/reset-password', protectedRoute, resetPassword);
+
+// ✅ NEW: Guest Profile Management Routes (Protected)
+router.put('/guest/update-phone', protectedRoute, updateGuestPhoneNumber);
+router.post('/guest/request-email-change', protectedRoute, requestGuestEmailChange);
+router.post('/guest/verify-email-change-otp', protectedRoute, verifyGuestEmailChangeOTP);
+router.post('/guest/confirm-email-change', protectedRoute, confirmGuestEmailChange);
 
 export default router;

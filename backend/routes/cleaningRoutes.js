@@ -13,7 +13,8 @@ import {
   acceptCleaningRequest, // NEW
   getCleanerPerformanceMetrics,
   getCleanerDashboardOverview,
-  getAllCleaningRequestsInHotel
+  getAllCleaningRequestsInHotel,
+  checkPendingCleaningRequest
 } from '../controllers/cleaningController.js';
 import {
   adminMiddleware,
@@ -29,6 +30,7 @@ const router = express.Router();
 
 // --- Guest Routes (for guests to request cleaning) ---
 router.post('/guest-request', protectedRoute, createGuestCleaningRequest);
+router.get('/check-pending/:roomId', protectedRoute, checkPendingCleaningRequest); 
 
 // --- Cleaner Routes (for staff) ---
 router.get('/my-tasks', protectedRoute, cleanerMiddleware, getMyTasks);

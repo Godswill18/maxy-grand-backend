@@ -430,7 +430,7 @@ export const getAllStaffInHotel = async (req, res) => {
         }
 
         // Define staff roles to include
-        const staffRoles = ['receptionist', 'cleaner', 'waiter', 'admin'];
+        const staffRoles = ['receptionist', 'cleaner', 'waiter', 'headWaiter', 'admin'];
 
         // 2. Query the database using the logged-in user's hotelId
         const staffMembers = await User.find({ 
@@ -762,7 +762,15 @@ export const createGuestAccount = async (req, res) => {
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.user._id; // From protected route middleware
-    const { accountNumber, bankName } = req.body;
+    const { firstName, lastName, accountNumber, bankName } = req.body;
+
+    // Validation
+    if (!firstName || !lastName) {
+      return res.status(400).json({
+        success: false,
+        message: "First name and last name are required"
+      });
+    }
 
     if (!accountNumber || !bankName) {
       return res.status(400).json({
@@ -771,11 +779,22 @@ export const updateUserProfile = async (req, res) => {
       });
     }
 
+    // Validate account number length
+    if (accountNumber.trim().length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Account number must be at least 8 characters"
+      });
+    }
+
+    // Update user profile
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       {
-        accountNumber,
-        bankName
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        accountNumber: accountNumber.trim(),
+        bankName: bankName.trim()
       },
       { new: true, runValidators: true }
     ).select('-password');
@@ -1049,3 +1068,4 @@ async function sendOTPEmail(email, firstName, otp) {
 
   return transporter.sendMail(mailOptions);
 }
+

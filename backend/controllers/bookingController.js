@@ -329,10 +329,85 @@ export const createBookingWithPayment = async (req, res) => {
       numberOfRooms,
       paymentReference,
       paymentAmount,
+      preferences
     } = req.body;
 
-    // 1️⃣ Verify payment with Paystack first
+    // ✅ STEP 1: Comprehensive Input Validation
+    console.log('🔍 Starting booking validation...');
+
+    // Validate required fields
+    if (!roomTypeId || !hotelId || !guestName || !guestEmail || !guestPhone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: roomTypeId, hotelId, guestName, guestEmail, and guestPhone are required'
+      });
+    }
+
+    if (!checkInDate || !checkOutDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Check-in and check-out dates are required'
+      });
+    }
+
+    if (!numberOfGuests || numberOfGuests < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least 1 guest is required'
+      });
+    }
+
+    if (!numberOfRooms || numberOfRooms < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least 1 room is required'
+      });
+    }
+
+    if (!totalAmount || totalAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid total amount'
+      });
+    }
+
+    if (!paymentReference) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment reference is required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(guestEmail)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format'
+      });
+    }
+
+    // Validate phone format (basic validation)
+    if (guestPhone.length < 10) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid phone number'
+      });
+    }
+
+    console.log('✅ Input validation passed');
+
+    // 2️⃣ Verify payment with Paystack first - MUST succeed before creating booking
+    console.log('💳 Verifying payment with Paystack...');
     const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+
+    if (!PAYSTACK_SECRET_KEY) {
+      console.error('❌ Paystack secret key not configured');
+      return res.status(500).json({
+        success: false,
+        error: 'Payment system not configured. Please contact support.'
+      });
+    }
 
     const verifyPaymentPromise = new Promise((resolve, reject) => {
       const options = {
@@ -376,121 +451,209 @@ export const createBookingWithPayment = async (req, res) => {
     let paymentData;
     try {
       paymentData = await verifyPaymentPromise;
+      console.log('✅ Payment verified successfully:', {
+        reference: paymentReference,
+        amount: paymentData.amount,
+        status: paymentData.status
+      });
+
+      // Verify payment amount matches booking amount
+      const expectedAmountInKobo = paymentAmount * 100;
+      if (paymentData.amount !== expectedAmountInKobo) {
+        console.error('❌ Payment amount mismatch:', {
+          expected: expectedAmountInKobo,
+          received: paymentData.amount
+        });
+        return res.status(400).json({
+          success: false,
+          error: 'Payment amount does not match booking total. No booking created.',
+        });
+      }
     } catch (error) {
+      console.error('❌ Payment verification failed:', error.message);
       return res.status(400).json({
         success: false,
-        error: 'Payment verification failed. No booking created.',
+        error: 'Payment verification failed. No booking created. Please contact support if payment was deducted.',
       });
     }
 
-    // 2️⃣ Payment verified - now validate booking data
-    if (new Date(checkOutDate) <= new Date(checkInDate)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Check-out date must be after check-in date' 
+    // 3️⃣ Payment verified - now validate booking data
+    console.log('📅 Validating dates...');
+
+    const checkInDateObj = new Date(checkInDate);
+    const checkOutDateObj = new Date(checkOutDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (checkInDateObj < today) {
+      return res.status(400).json({
+        success: false,
+        error: 'Check-in date cannot be in the past'
       });
     }
 
-    // 3️⃣ Find the room
+    if (checkOutDateObj <= checkInDateObj) {
+      return res.status(400).json({
+        success: false,
+        error: 'Check-out date must be after check-in date'
+      });
+    }
+
+    console.log('✅ Date validation passed');
+
+    // 4️⃣ Verify room exists
+    console.log('🏨 Checking room availability...');
     const room = await RoomType.findById(roomTypeId);
     if (!room) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Room not found' 
+      return res.status(404).json({
+        success: false,
+        error: 'Room type not found. Payment has been processed. Please contact support.'
       });
     }
 
-    // 4️⃣ Check availability for ALL rooms
+    // 5️⃣ Check availability - CRITICAL: Must be available
     const conflictingBooking = await Booking.findOne({
       roomTypeId: roomTypeId,
       bookingStatus: { $in: ['confirmed', 'checked-in'] },
       $and: [
-        { checkInDate: { $lt: new Date(checkOutDate) } },
-        { checkOutDate: { $gt: new Date(checkInDate) } },
+        { checkInDate: { $lt: checkOutDateObj } },
+        { checkOutDate: { $gt: checkInDateObj } },
       ]
     });
 
     if (conflictingBooking) {
-      // Payment was made but room is not available - should refund
+      console.error('❌ Room conflict detected:', {
+        requestedRoom: roomTypeId,
+        conflictingBookingId: conflictingBooking._id,
+        conflictDates: {
+          checkIn: conflictingBooking.checkInDate,
+          checkOut: conflictingBooking.checkOutDate
+        }
+      });
+
+      // Payment was made but room is not available - needs manual refund
       return res.status(400).json({
         success: false,
-        error: `Room ${room.roomNumber} is no longer available for these dates. Please contact support for a refund.`,
+        error: `Room is no longer available for these dates. Payment has been processed. Please contact support immediately with reference: ${paymentReference} for a refund.`,
+        paymentReference,
+        requiresRefund: true
       });
     }
 
-    // 5️⃣ Create bookings (one for each room)
-    const bookingsToCreate = [];
-    const amountPerRoom = totalAmount / numberOfRooms;
-    const paidAmountPerRoom = paymentAmount / numberOfRooms;
+    console.log('✅ Room is available');
 
-    for (let i = 0; i < numberOfRooms; i++) {
-      let confirmationCode = '';
-      let isCodeUnique = false;
-      while (!isCodeUnique) {
-        confirmationCode = generateConfirmationCode(6);
-        const existingBooking = await Booking.findOne({ confirmationCode });
-        if (!existingBooking) {
-          isCodeUnique = true;
+    // 6️⃣ Use MongoDB session for transaction safety
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      console.log('💾 Creating bookings with transaction...');
+
+      // Create bookings (one for each room)
+      const bookingsToCreate = [];
+      const amountPerRoom = totalAmount / numberOfRooms;
+      const paidAmountPerRoom = paymentAmount / numberOfRooms;
+
+      for (let i = 0; i < numberOfRooms; i++) {
+        // Generate unique confirmation code
+        let confirmationCode = '';
+        let isCodeUnique = false;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 10;
+
+        while (!isCodeUnique && attempts < MAX_ATTEMPTS) {
+          confirmationCode = generateConfirmationCode(6);
+          const existingBooking = await Booking.findOne({ confirmationCode }).session(session);
+          if (!existingBooking) {
+            isCodeUnique = true;
+          }
+          attempts++;
         }
+
+        if (!isCodeUnique) {
+          throw new Error('Failed to generate unique confirmation code');
+        }
+
+        const booking = new Booking({
+          hotelId: hotelId || user.hotelId,
+          roomTypeId,
+          guestId: req.user._id,
+          guestName,
+          guestEmail,
+          guestPhone,
+          checkInDate: checkInDateObj,
+          checkOutDate: checkOutDateObj,
+          bookingType: 'online',
+          totalAmount: amountPerRoom,
+          amountPaid: paidAmountPerRoom,
+          paymentStatus: 'paid',
+          bookingStatus: 'confirmed',
+          confirmationCode,
+          numberOfGuests,
+          preferences: preferences || (specialRequests ? { specialRequests } : undefined),
+        });
+
+        console.log(`💾 Creating booking ${i + 1}/${numberOfRooms} - Confirmation: ${confirmationCode}`);
+        bookingsToCreate.push(booking.save({ session }));
       }
 
-      // const guestDetails = {};
+      // Save all bookings atomically
+      const savedBookings = await Promise.all(bookingsToCreate);
+      console.log(`✅ ${savedBookings.length} bookings created successfully`);
 
-      const booking = new Booking({
-        hotelId: hotelId || user.hotelId,
-        roomTypeId,
-        guestId: req.user._id,
-        guestName,
-        guestEmail,
-        guestPhone,
-        checkInDate,
-        checkOutDate,
-        bookingType: 'online',
-        totalAmount: amountPerRoom,
-        amountPaid: paidAmountPerRoom,
-        paymentStatus: 'paid',
-        bookingStatus: 'confirmed',
-        confirmationCode,
-        // guestDetails,
-        numberOfGuests,
-        specialRequests,
+      // Create payment records for each booking
+      console.log('💳 Creating payment records...');
+      const paymentRecords = savedBookings.map(booking => {
+        return new Payment({
+          bookingId: booking._id,
+          amount: booking.amountPaid,
+          status: 'completed',
+          gatewayRef: paymentReference,
+        }).save({ session });
       });
 
-      bookingsToCreate.push(booking.save());
+      await Promise.all(paymentRecords);
+      console.log(`✅ ${paymentRecords.length} payment records created`);
+
+      // Commit transaction - all or nothing
+      await session.commitTransaction();
+      console.log('✅ Transaction committed successfully');
+
+      // Emit socket events (after transaction success)
+      for (const booking of savedBookings) {
+        const populatedBooking = await getPopulatedBooking(booking._id);
+        req.io?.emit('bookingCreated', populatedBooking);
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: `${numberOfRooms} booking(s) created successfully`,
+        data: savedBookings,
+        confirmationCodes: savedBookings.map(b => b.confirmationCode)
+      });
+
+    } catch (transactionError) {
+      // Rollback transaction on any error
+      await session.abortTransaction();
+      console.error('❌ Transaction aborted - booking creation failed:', transactionError.message);
+
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create booking. Payment has been processed. Please contact support with reference: ' + paymentReference,
+        paymentReference,
+        requiresRefund: true
+      });
+    } finally {
+      session.endSession();
     }
-
-    // 6️⃣ Save all bookings
-    const savedBookings = await Promise.all(bookingsToCreate);
-
-    // 7️⃣ Create payment records for each booking
-    const paymentRecords = savedBookings.map(booking => {
-      return new Payment({
-        bookingId: booking._id,
-        amount: booking.amountPaid,
-        status: 'completed',
-        gatewayRef: paymentReference,
-      }).save();
-    });
-
-    await Promise.all(paymentRecords);
-
-    // 8️⃣ Emit socket events
-    for (const booking of savedBookings) {
-      const populatedBooking = await getPopulatedBooking(booking._id);
-      req.io.emit('bookingCreated', populatedBooking);
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: `${numberOfRooms} booking(s) created successfully`,
-      data: savedBookings,
-    });
 
   } catch (error) {
-    console.error('Error creating booking with payment:', error.message);
-    return res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
+    console.error('❌ Critical error in booking creation:', error.message);
+    console.error('Stack:', error.stack);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error. Please contact support.',
+      details: error.message
     });
   }
 };

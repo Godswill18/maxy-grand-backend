@@ -3,11 +3,16 @@ import { verifyPayment, handleWebhook } from '../controllers/paymentController.j
 import { protectedRoute } from '../middleware/protectedRoutes.js';
 import { superAdminMiddleware } from '../middleware/authMiddleware.js';
 import { getHotelPayments, getAllPayments, getPaymentStats, getPaymentById, createPayment } from '../controllers/paymentController.js';
+import { paymentLimiter } from '../middleware/rateLimiter.js';
+import { paymentIdempotency } from '../middleware/idempotency.js';
 
 const router = express.Router();
 
-router.post('/verify', protectedRoute, verifyPayment);
-router.post('/webhook', handleWebhook); // No auth - Paystack calls this
+// Payment verification — rate limited (5/min per user) + idempotency guard
+router.post('/verify', protectedRoute, paymentLimiter, paymentIdempotency, verifyPayment);
+
+// Webhook — no auth (Paystack-signed), no rate limit (trusted source)
+router.post('/webhook', handleWebhook);
 
 router.get('/hotel/:hotelId', protectedRoute, superAdminMiddleware, getHotelPayments);
 
@@ -20,8 +25,8 @@ router.get('/stats/:hotelId', protectedRoute, superAdminMiddleware, getPaymentSt
 // Get single payment by ID
 router.get('/:id', protectedRoute, superAdminMiddleware, getPaymentById);
 
-// Create a payment record (used internally)
-router.post('/create', protectedRoute, createPayment);
+// Create a payment record (used internally) — rate limited
+router.post('/create', protectedRoute, paymentLimiter, createPayment);
 
 
 export default router;

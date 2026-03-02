@@ -33,6 +33,14 @@ import shiftRoutes from '../routes/shiftRoutes.js';
 import blogsRoutes from '../routes/blogRoutes.js';
 import notificationRoutes from '../routes/notificationRoutes.js';
 import { setupShiftCronJobs } from '../cron/shiftCronJobs.js';
+import {
+    loginLimiter,
+    signupLimiter,
+    forgotPasswordLimiter,
+    availabilityLimiter,
+    adminLimiter,
+    generalLimiter,
+} from '../middleware/rateLimiter.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -96,6 +104,28 @@ app.use((req, res, next) => {
 });
 
 
+
+// ── Rate Limiters (applied before route handlers) ─────────────────────────────
+// Public auth endpoints — IP-based, strict limits
+app.use('/api/users/login-user', loginLimiter);
+app.use('/api/users/login-guest', loginLimiter);
+app.use('/api/users/create-user', signupLimiter);
+app.use('/api/users/request-password-reset', forgotPasswordLimiter);
+
+// Public room availability — IP-based, generous but scraping-resistant
+app.use('/api/rooms/get-all-rooms', availabilityLimiter);
+app.use('/api/rooms/available', availabilityLimiter);
+app.use('/api/rooms/available_rooms', availabilityLimiter);
+
+// Admin/staff dashboards — user-based, high limits
+app.use('/api/analytics', adminLimiter);
+app.use('/api/dashboard', adminLimiter);
+app.use('/api/performance', adminLimiter);
+app.use('/api/reports', adminLimiter);
+
+// Global catch-all — 100 req/min per IP (protects all remaining endpoints)
+app.use('/api', generalLimiter);
+// ──────────────────────────────────────────────────────────────────────────────
 
 // Routes
 app.use('/api/users', usersRoutes); // to handle user related routes

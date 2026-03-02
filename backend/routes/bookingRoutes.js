@@ -18,6 +18,8 @@ import {
   updateBookingPayment
 } from '../controllers/bookingController.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin, receptionistMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js';
+import { bookingLimiter, availabilityLimiter } from '../middleware/rateLimiter.js';
+import { acquireReservationLock, releaseOnSuccess } from '../middleware/reservationLock.js';
 
 const router = express.Router();
 
@@ -25,14 +27,15 @@ const router = express.Router();
 router.get('/get-hotel-bookings', protectedRoute, adminAndSuperAdminMiddleware, getAllBookingsInHotel);
 router.get('/hotel-summary/:hotelId', protectedRoute, adminAndSuperAdminMiddleware, getHotelBookingSummary);
 
-// Create bookings
-router.post('/create-with-payment', protectedRoute, createBookingWithPayment);
-router.post('/create-walkin', protectedRoute, isStaffOrAdmin, createBooking);
+// Create bookings — rate limited per user + reservation lock released on success
+router.post('/create-with-payment', protectedRoute, bookingLimiter, releaseOnSuccess, createBookingWithPayment);
+router.post('/create-walkin',       protectedRoute, isStaffOrAdmin, bookingLimiter, createBooking);
 
 // Get all bookings (Admin/Receptionist)
 router.get('/all', protectedRoute, isStaffOrAdmin, getAllBookings);
 
-router.post('/check-availability', protectedRoute, checkRoomAvailability);
+// Availability check — rate limited + acquires 15-min reservation lock
+router.post('/check-availability', protectedRoute, availabilityLimiter, acquireReservationLock, checkRoomAvailability);
 
 // Get all bookings for a specific user - MUST come before /:id
 router.get('/user/:userId', protectedRoute, getUserBookings);

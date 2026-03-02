@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(redis-cli ping:*)",
+      "Bash(where:*)",
+      "Bash(Get-Service -Name \"Redis*\")",
+      "Bash(sc query:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)"
+    ]
+  }
+}

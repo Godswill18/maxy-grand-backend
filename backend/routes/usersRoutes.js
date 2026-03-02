@@ -30,14 +30,16 @@ import {
 } from '../controllers/guestProfileController.js';
 
 import { adminAndSuperAdminMiddleware, superAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
+import { loginAttemptGuard } from '../middleware/loginAttemptGuard.js';
 
 const router = express.Router();
 
 // ✅ Auth Routes
 router.get('/get-user', protectedRoute, getUser);
 router.post('/create-user', signUp);
-router.post('/login-user', login);
-router.post('/login-guest', loginGuest);
+// loginAttemptGuard tracks failed attempts → locks after 5 failures for 60 s
+router.post('/login-user',  loginAttemptGuard, login);
+router.post('/login-guest', loginAttemptGuard, loginGuest);
 router.post('/logout-user', logout);
 
 // ✅ Admin Routes

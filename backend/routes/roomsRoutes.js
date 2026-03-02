@@ -16,7 +16,8 @@ import {
   updateRoomStatus, // NEW
   getRoomStatusByHotel,
   getAllRoomsInHotel,
-  getAvailableRoomsRange
+  getAvailableRoomsRange,
+  toggleRoomAvailability
 } from '../controllers/roomsController.js';
 import roomsImages from '../config/roomsMulter.js';
 import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
@@ -96,6 +97,9 @@ router.patch('/:id', protectedRoute, isStaffOrAdmin, updateRoomStatus);
 router.get('/available', protectedRoute, getAvailableRooms);
 
 router.get('/available_rooms', protectedRoute, getAvailableRoomsRange);
+
+// Toggle room availability for guest bookings
+router.patch('/toggle-availability/:id', protectedRoute, adminAndSuperAdminMiddleware, toggleRoomAvailability);
 
 
 

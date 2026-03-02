@@ -387,12 +387,26 @@ export const createBookingWithPayment = async (req, res) => {
       });
     }
 
-    // Validate phone format (basic validation)
-    if (guestPhone.length < 10) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid phone number'
-      });
+    // ✅ Enhanced phone number validation
+    const phoneDigits = guestPhone.replace(/\D/g, '');
+    const hasCountryCode = guestPhone.startsWith('+');
+
+    if (hasCountryCode) {
+      // With country code: exactly 14 digits (+234 + 11 digits)
+      if (phoneDigits.length !== 14) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid phone number: With country code, must be exactly 14 digits (e.g., +234 800 000 0000). Current: ${phoneDigits.length} digits`
+        });
+      }
+    } else {
+      // Without country code: exactly 11 digits
+      if (phoneDigits.length !== 11) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid phone number: Must be exactly 11 digits (e.g., 08012345678). Current: ${phoneDigits.length} digits`
+        });
+      }
     }
 
     console.log('✅ Input validation passed');
@@ -1374,12 +1388,12 @@ export const deleteBooking = async (req, res) => {
 export const getUserBookings = async (req, res) => {
   try {
     const userId = req.params.userId;
-    
+
     console.log('Fetching bookings for user:', userId); // Debug log
 
-    
+
 const objectId = new mongoose.Types.ObjectId(userId);
-    
+
     const bookings = await Booking.find({ guestId: objectId })
       .populate('hotelId', 'name address')
       .populate({
@@ -1389,17 +1403,54 @@ const objectId = new mongoose.Types.ObjectId(userId);
 
     console.log('Found bookings:', bookings.length); // Debug log
 
-    return res.status(200).json({ 
-      success: true, 
+    return res.status(200).json({
+      success: true,
       data: bookings,
-      count: bookings.length 
+      count: bookings.length
     });
   } catch (error) {
     console.error('Error fetching user bookings:', error.message);
-    return res.status(500).json({ 
-      success: false, 
+    return res.status(500).json({
+      success: false,
       error: 'Internal server error',
-      details: error.message 
+      details: error.message
+    });
+  }
+};
+
+/**
+ * @desc Get all bookings for a specific guest (for super admin)
+ * @route GET /api/bookings/guest/:guestId
+ */
+export const getGuestBookings = async (req, res) => {
+  try {
+    const guestId = req.params.guestId;
+
+    console.log('Fetching bookings for guest:', guestId);
+
+    const objectId = new mongoose.Types.ObjectId(guestId);
+
+    const bookings = await Booking.find({ guestId: objectId })
+      .populate('hotelId', 'name address')
+      .populate({
+        path: 'roomTypeId',
+        select: 'name price images amenities roomNumber',
+      })
+      .sort({ createdAt: -1 });
+
+    console.log('Found guest bookings:', bookings.length);
+
+    return res.status(200).json({
+      success: true,
+      data: bookings,
+      count: bookings.length
+    });
+  } catch (error) {
+    console.error('Error fetching guest bookings:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
     });
   }
 };

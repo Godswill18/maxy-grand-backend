@@ -7,6 +7,7 @@ import {
   updateBookingStatus,
   deleteBooking,
   getUserBookings,
+  getGuestBookings,
   createBookingWithPayment,
   verifyBookingConfirmationCode,
   getHotelBookingSummary,
@@ -16,7 +17,7 @@ import {
   checkRoomAvailability,
   updateBookingPayment
 } from '../controllers/bookingController.js';
-import { adminAndSuperAdminMiddleware, isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
+import { adminAndSuperAdminMiddleware, isStaffOrAdmin, receptionistMiddleware, superAdminMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -35,6 +36,9 @@ router.post('/check-availability', protectedRoute, checkRoomAvailability);
 
 // Get all bookings for a specific user - MUST come before /:id
 router.get('/user/:userId', protectedRoute, getUserBookings);
+
+// Get all bookings for a specific guest (super admin only)
+router.get('/guest/:guestId', protectedRoute, adminAndSuperAdminMiddleware, getGuestBookings);
 
 router.patch('/:id/payment', protectedRoute, isStaffOrAdmin, updateBookingPayment);
 

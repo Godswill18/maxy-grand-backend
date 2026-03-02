@@ -723,10 +723,59 @@ export const getAvailableRoomsRange = async (req, res) => {
   } catch (error) {
     console.error('❌ Error fetching available rooms:', error.message);
     console.error('Stack:', error.stack);
-    return res.status(500).json({ 
-      success: false, 
+    return res.status(500).json({
+      success: false,
       error: 'Internal server error',
-      details: error.message 
+      details: error.message
+    });
+  }
+};
+
+/**
+ * @desc Toggle room availability for guest bookings
+ * @route PATCH /api/rooms/toggle-availability/:id
+ * @access Admin/SuperAdmin
+ */
+export const toggleRoomAvailability = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isAvailable } = req.body;
+
+    // Validate input
+    if (typeof isAvailable !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: 'isAvailable must be a boolean value'
+      });
+    }
+
+    // Find and update the room
+    const room = await RoomType.findById(id);
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        error: 'Room not found'
+      });
+    }
+
+    // Update availability
+    room.isAvailable = isAvailable;
+    const updatedRoom = await room.save();
+
+    console.log(`✅ Room ${room.roomNumber} availability updated to: ${isAvailable}`);
+
+    return res.status(200).json({
+      success: true,
+      message: `Room ${isAvailable ? 'enabled' : 'disabled'} for guest bookings`,
+      data: updatedRoom
+    });
+
+  } catch (error) {
+    console.error('❌ Error toggling room availability:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
     });
   }
 };

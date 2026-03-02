@@ -1,5 +1,6 @@
 const allowedOrigins = [
     // 'http://192.168.0.7:8080',
+    'https://api.maxygrandhotel.com',
     'http://localhost:8080',
     'http://localhost:8081'
     // 'http://localhost:5173',

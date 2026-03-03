@@ -1,24 +1,26 @@
 import express from 'express';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
-import { 
-  signUp, 
-  login, 
-  logout, 
-  getAdmins, 
-  getUser, 
-  getAllStaff, 
-  updateStaffStatus, 
-  getAllGuests, 
-  getUserById, 
-  updateStaffRole, 
-  findUserByEmail, 
-  createGuestAccount, 
-  getAllStaffInHotel, 
+import {
+  signUp,
+  login,
+  logout,
+  getAdmins,
+  getUser,
+  getAllStaff,
+  updateStaffStatus,
+  getAllGuests,
+  getUserById,
+  updateStaffRole,
+  findUserByEmail,
+  createGuestAccount,
+  getAllStaffInHotel,
   loginGuest,
   updateUserProfile,
   requestPasswordReset,
   verifyResetOTP,
-  resetPassword
+  resetPassword,
+  forgotPassword,
+  confirmResetPassword,
 } from '../controllers/usersController.js';
 
 // ✅ Import new guest profile controllers
@@ -62,6 +64,10 @@ router.put('/update-profile', protectedRoute, updateUserProfile);
 router.post('/request-password-reset', protectedRoute, requestPasswordReset);
 router.post('/verify-reset-otp', protectedRoute, verifyResetOTP);
 router.post('/reset-password', protectedRoute, resetPassword);
+
+// ✅ Public Password Reset Routes (no auth required — unauthenticated users)
+router.post('/forgot-password', forgotPassword);
+router.post('/confirm-reset-password', confirmResetPassword);
 
 // ✅ NEW: Guest Profile Management Routes (Protected)
 router.put('/guest/update-phone', protectedRoute, updateGuestPhoneNumber);

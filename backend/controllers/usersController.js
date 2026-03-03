@@ -2,6 +2,8 @@ import { generateTokenAndSetCookie } from "../lib/utils/generateToken.js";
 import { checkShiftBeforeLogin } from "../middleware/shiftCheckMiddleware.js";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { sendPasswordResetEmail, sendOTPEmail, sendPasswordChangedConfirmation } from '../services/emailService.js';
 
 
 
@@ -1018,54 +1020,133 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-// ✅ Helper function: Send OTP email
-async function sendOTPEmail(email, firstName, otp) {
-  const nodemailer = await import('nodemailer');
-  
-  // Configure your email service
-  const transporter = nodemailer.createTransport({
-    service: process.env.EMAIL_SERVICE || 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER || 'gokhamera@gmail.com',
-      pass: process.env.EMAIL_PASSWORD || 'wzhy yaqj ntzl qkyh',
-    },
-  });
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: "Password Reset OTP - Hotel Management System",
-    html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
-        <div style="text-align: center; margin-bottom: 30px;">
-          <h2 style="color: #333;">Password Reset Request</h2>
-        </div>
-        
-        <p>Hi ${firstName},</p>
-        
-        <p>You requested to reset your password. Here is your One-Time Password (OTP):</p>
-        
-        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; text-align: center; margin: 20px 0;">
-          <h3 style="color: #007bff; margin: 0; font-size: 32px; letter-spacing: 5px;">${otp}</h3>
-        </div>
-        
-        <p style="color: #666;">
-          <strong>Important:</strong> This OTP is valid for <strong>10 minutes</strong> only.
-        </p>
-        
-        <p style="color: #666;">
-          If you did not request this password reset, please ignore this email. Your account is secure.
-        </p>
-        
-        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-        
-        <p style="color: #999; font-size: 12px;">
-          This is an automated email. Please do not reply to this message.
-        </p>
-      </div>
-    `
-  };
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: Forgot Password — generates a secure link-based reset token
+// POST /api/users/forgot-password
+// ─────────────────────────────────────────────────────────────────────────────
+export const forgotPassword = async (req, res) => {
+    const GENERIC_SUCCESS = "If an account exists with this email, a reset link has been sent.";
+    try {
+        const { email } = req.body;
 
-  return transporter.sendMail(mailOptions);
-}
+        if (!email) {
+            return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email.trim())) {
+            return res.status(400).json({ success: false, message: "Invalid email format" });
+        }
+
+        const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+        if (!user) {
+            return res.status(200).json({ success: true, message: GENERIC_SUCCESS });
+        }
+
+        const PasswordReset = (await import('../models/passwordResetModel.js')).default;
+
+        // Invalidate any previous unused tokens for this user
+        await PasswordReset.deleteMany({ userId: user._id, used: false });
+
+        // Cryptographically secure random token — store only the hash
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+        await PasswordReset.create({
+            userId: user._id,
+            tokenHash,
+            expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
+            used: false,
+        });
+
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+        try {
+            await sendPasswordResetEmail(user.email, user.firstName, resetLink);
+        } catch (emailError) {
+            console.error("[PASSWORD_RESET] Email send failed:", emailError.message);
+            await PasswordReset.deleteOne({ tokenHash });
+            return res.status(500).json({ success: false, message: "Failed to send reset email. Please try again." });
+        }
+
+        console.log(`[PASSWORD_RESET] Requested | user: ${user._id} | ip: ${req.ip} | ${new Date().toISOString()}`);
+
+        return res.status(200).json({ success: true, message: GENERIC_SUCCESS });
+    } catch (error) {
+        console.error("[PASSWORD_RESET] Error in forgotPassword:", error.message);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC: Confirm Reset Password — validates token and sets new password
+// POST /api/users/confirm-reset-password
+// ─────────────────────────────────────────────────────────────────────────────
+export const confirmResetPassword = async (req, res) => {
+    try {
+        const { token, newPassword, confirmPassword } = req.body;
+
+        if (!token || !newPassword || !confirmPassword) {
+            return res.status(400).json({ success: false, message: "Token, new password, and confirmation are required" });
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({ success: false, message: "Passwords do not match" });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ success: false, message: "Password must be at least 8 characters long" });
+        }
+
+        const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
+        if (!strongPasswordRegex.test(newPassword)) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must contain at least one uppercase letter, one lowercase letter, and one number",
+            });
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+        const PasswordReset = (await import('../models/passwordResetModel.js')).default;
+        const resetRecord = await PasswordReset.findOne({ tokenHash });
+
+        if (!resetRecord || resetRecord.used || new Date() > resetRecord.expiresAt) {
+            if (resetRecord) await PasswordReset.deleteOne({ _id: resetRecord._id });
+            return res.status(400).json({ success: false, message: "Invalid or expired reset link." });
+        }
+
+        const user = await User.findById(resetRecord.userId);
+        if (!user) {
+            return res.status(400).json({ success: false, message: "Invalid or expired reset link." });
+        }
+
+        // bcrypt hashing happens in the User pre-save hook
+        user.password = newPassword;
+        user.passwordResetToken = null;
+        user.passwordResetTokenExpiry = null;
+        user.passwordResetVerified = false;
+        await user.save();
+
+        // Mark as used and clean up any other active tokens for this user
+        await PasswordReset.updateOne({ _id: resetRecord._id }, { used: true });
+        await PasswordReset.deleteMany({ userId: user._id, _id: { $ne: resetRecord._id } });
+
+        console.log(`[PASSWORD_RESET] Success | user: ${user._id} | ip: ${req.ip} | ${new Date().toISOString()}`);
+
+        // Fire-and-forget — don't block the success response on a cosmetic email
+        sendPasswordChangedConfirmation(user.email, user.firstName).catch(err =>
+            console.error('[PASSWORD_RESET] Confirmation email failed:', err.message)
+        );
+
+        return res.status(200).json({ success: true, message: "Password successfully reset. Please log in." });
+    } catch (error) {
+        console.error("[PASSWORD_RESET] Error in confirmResetPassword:", error.message);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
 

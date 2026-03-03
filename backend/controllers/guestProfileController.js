@@ -2,60 +2,7 @@
 
 import User from '../models/userModel.js';
 import bcrypt from 'bcryptjs';
-
-// Helper function: Send OTP email
-async function sendOTPEmail(email, firstName, otp, purpose = 'verification') {
-  const nodemailer = await import('nodemailer');
-  
-  const transporter = nodemailer.createTransport({
-    service: process.env.EMAIL_SERVICE || 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER || 'gokhamera@gmail.com',
-      pass: process.env.EMAIL_PASSWORD || 'wzhy yaqj ntzl qkyh',
-    },
-  });
-
-  const subject = purpose === 'email-change' 
-    ? 'Email Change Verification - Hotel Management System'
-    : 'Verification Code - Hotel Management System';
-
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject,
-    html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
-        <div style="text-align: center; margin-bottom: 30px;">
-          <h2 style="color: #333;">${purpose === 'email-change' ? 'Email Change Request' : 'Verification Required'}</h2>
-        </div>
-        
-        <p>Hi ${firstName},</p>
-        
-        <p>${purpose === 'email-change' ? 'You requested to change your email address.' : 'Here is your verification code'}:</p>
-        
-        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; text-align: center; margin: 20px 0;">
-          <h3 style="color: #007bff; margin: 0; font-size: 32px; letter-spacing: 5px;">${otp}</h3>
-        </div>
-        
-        <p style="color: #666;">
-          <strong>Important:</strong> This code is valid for <strong>10 minutes</strong> only.
-        </p>
-        
-        <p style="color: #666;">
-          If you did not request this, please ignore this email.
-        </p>
-        
-        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-        
-        <p style="color: #999; font-size: 12px;">
-          This is an automated email. Please do not reply to this message.
-        </p>
-      </div>
-    `
-  };
-
-  return transporter.sendMail(mailOptions);
-}
+import { sendOTPEmail } from '../services/emailService.js';
 
 // ✅ Update phone number (simple, no verification needed)
 export const updateGuestPhoneNumber = async (req, res) => {

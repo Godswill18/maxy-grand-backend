@@ -32,6 +32,7 @@ import paymentRoutes from '../routes/paymentRoutes.js';
 import shiftRoutes from '../routes/shiftRoutes.js';
 import blogsRoutes from '../routes/blogRoutes.js';
 import notificationRoutes from '../routes/notificationRoutes.js';
+import roomCategoryRoutes from '../routes/roomCategoryRoutes.js';
 import { setupShiftCronJobs } from '../cron/shiftCronJobs.js';
 import {
     loginLimiter,
@@ -111,6 +112,7 @@ app.use('/api/users/login-user', loginLimiter);
 app.use('/api/users/login-guest', loginLimiter);
 app.use('/api/users/create-user', signupLimiter);
 app.use('/api/users/request-password-reset', forgotPasswordLimiter);
+app.use('/api/users/forgot-password', forgotPasswordLimiter);
 
 // Public room availability — IP-based, generous but scraping-resistant
 app.use('/api/rooms/get-all-rooms', availabilityLimiter);
@@ -149,6 +151,7 @@ app.use('/api/payments', paymentRoutes); // payment routes
 app.use('/api/shifts', shiftRoutes); // shift routes
 app.use('/api/blogs', blogsRoutes); // blog routes
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/room-categories', roomCategoryRoutes); // room category routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

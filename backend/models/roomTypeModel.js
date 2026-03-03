@@ -37,6 +37,11 @@ const roomTypeSchema = new mongoose.Schema({
     isAvailable: {
         type: Boolean,
         default: true
+    },
+    categoryId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'RoomCategory',
+        default: null,
     }
 }, {timestamps: true});
 

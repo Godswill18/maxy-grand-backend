@@ -7,7 +7,9 @@
       "Bash(Get-Service -Name \"Redis*\")",
       "Bash(sc query:*)",
       "Bash(netstat:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(ls -1d backend/*/)",
+      "Bash(docker --version)"
     ]
   }
 }

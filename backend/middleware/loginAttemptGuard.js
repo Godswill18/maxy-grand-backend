@@ -5,14 +5,15 @@
  * Locks an IP + email for 60 seconds after 5 consecutive failures.
  * Resets the counter on a successful login.
  *
+ * Primary store  : Redis (shared across all instances)
+ * Fallback store : In-memory Maps (single-process, used when Redis is down)
+ *
  * IMPORTANT: Uses res.json interception (not res.on('finish')) so that
  * the 5th failed attempt itself returns a 429 — not the 6th request.
- * The response body is rewritten in-flight before Express sends anything
- * to the client.
  *
  * Flow per request:
  *   1. Check if IP or email is currently locked → 429 with retryAfter
- *   2. Intercept res.json before calling next():
+ *   2. Intercept res.json:
  *        HTTP 200 + success:true  → reset all attempt counters, pass through
  *        HTTP 400 + success:false → increment counter; if now locked, rewrite to 429
  *        HTTP 403                 → pass through unchanged (not a brute-force signal)
@@ -47,8 +48,6 @@ const emailCountKey = (email) => `login:attempts:email:${email}`;
 const emailLockKey  = (email) => `login:locked:email:${email}`;
 
 // ─── Lua: Check lockout status ─────────────────────────────────────────────────
-// KEYS[1] = lock_key   KEYS[2] = count_key
-// Returns: [is_locked(0|1), ttl_remaining, current_count]
 const CHECK_LOCK_LUA = `
 local locked = redis.call('EXISTS', KEYS[1])
 if locked == 1 then
@@ -59,9 +58,6 @@ return {0, 0, count}
 `;
 
 // ─── Lua: Increment counter, set lockout when limit is reached ─────────────────
-// KEYS[1] = count_key   KEYS[2] = lock_key
-// ARGV[1] = max_attempts   ARGV[2] = counter_ttl   ARGV[3] = lock_seconds
-// Returns: [new_count, lock_seconds_if_just_locked (0 = not locked yet)]
 const INCR_AND_LOCK_LUA = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
@@ -82,6 +78,82 @@ for _, key in ipairs(KEYS) do
 end
 return 1
 `;
+
+// ─── In-Memory Fallback ────────────────────────────────────────────────────────
+// Used automatically when Redis is unavailable.
+// Structure: Map<string, { count: number, expiresAt: number }>
+
+const memAttempts = new Map(); // attempt counters
+const memLocks    = new Map(); // active lockouts
+
+// Periodic cleanup to prevent unbounded growth
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of memAttempts) if (v.expiresAt < now) memAttempts.delete(k);
+    for (const [k, v] of memLocks)    if (v.expiresAt < now) memLocks.delete(k);
+}, 60 * 1000).unref();
+
+function memCheckLockout(ip, email) {
+    const now = Date.now();
+
+    const ipLock = memLocks.get(ipLockKey(ip));
+    if (ipLock && ipLock.expiresAt > now) {
+        return { locked: true, retryAfter: Math.ceil((ipLock.expiresAt - now) / 1000), by: 'ip' };
+    }
+
+    if (email) {
+        const emailLock = memLocks.get(emailLockKey(email));
+        if (emailLock && emailLock.expiresAt > now) {
+            return { locked: true, retryAfter: Math.ceil((emailLock.expiresAt - now) / 1000), by: 'email' };
+        }
+    }
+
+    return { locked: false };
+}
+
+function memRecordAndCheck(ip, email) {
+    const now = Date.now();
+    let lockedFor = 0;
+
+    // Increment IP counter
+    const ipCK  = ipCountKey(ip);
+    const ipEnt = memAttempts.get(ipCK) || { count: 0, expiresAt: now + COUNTER_TTL * 1000 };
+    ipEnt.count += 1;
+    if (ipEnt.count === 1) ipEnt.expiresAt = now + COUNTER_TTL * 1000;
+    memAttempts.set(ipCK, ipEnt);
+
+    if (ipEnt.count >= MAX_ATTEMPTS) {
+        memLocks.set(ipLockKey(ip), { expiresAt: now + LOCK_SECONDS * 1000 });
+        memAttempts.delete(ipCK);
+        lockedFor = LOCK_SECONDS;
+    }
+
+    // Increment email counter
+    if (email) {
+        const emailCK  = emailCountKey(email);
+        const emailEnt = memAttempts.get(emailCK) || { count: 0, expiresAt: now + COUNTER_TTL * 1000 };
+        emailEnt.count += 1;
+        if (emailEnt.count === 1) emailEnt.expiresAt = now + COUNTER_TTL * 1000;
+        memAttempts.set(emailCK, emailEnt);
+
+        if (emailEnt.count >= MAX_ATTEMPTS) {
+            memLocks.set(emailLockKey(email), { expiresAt: now + LOCK_SECONDS * 1000 });
+            memAttempts.delete(emailCK);
+            lockedFor = Math.max(lockedFor, LOCK_SECONDS);
+        }
+    }
+
+    return lockedFor > 0 ? { locked: true, retryAfter: lockedFor } : { locked: false };
+}
+
+function memResetAttempts(ip, email) {
+    memAttempts.delete(ipCountKey(ip));
+    memLocks.delete(ipLockKey(ip));
+    if (email) {
+        memAttempts.delete(emailCountKey(email));
+        memLocks.delete(emailLockKey(email));
+    }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +184,7 @@ async function writeLog(entry) {
     }
 }
 
-// ─── Core Actions ─────────────────────────────────────────────────────────────
+// ─── Redis Core Actions ────────────────────────────────────────────────────────
 
 async function checkLockout(ip, email) {
     const ipResult = await redis.eval(
@@ -140,11 +212,6 @@ async function checkLockout(ip, email) {
     return { locked: false };
 }
 
-/**
- * Increment the failed-attempt counters and return whether the account
- * is now locked. Called synchronously inside the res.json intercept so
- * we can rewrite the response on the spot.
- */
 async function recordAndCheck(ip, email) {
     const args = [
         MAX_ATTEMPTS.toString(),
@@ -195,24 +262,26 @@ async function resetLoginAttempts(ip, email) {
 // ─── Middleware Export ─────────────────────────────────────────────────────────
 
 export const loginAttemptGuard = async (req, res, next) => {
-    // Fail open when Redis is unavailable
-    if (!isRedisReady()) {
-        console.warn('[LoginGuard] Redis unavailable — skipping attempt tracking');
-        return next();
-    }
+    const redisAvailable = isRedisReady();
 
     try {
         const ip    = getClientIp(req);
         const email = req.body?.email?.toLowerCase?.().trim() || null;
 
         // ── Step 1: Check if already locked ───────────────────────────────────
-        const lockStatus = await checkLockout(ip, email);
+        const lockStatus = redisAvailable
+            ? await checkLockout(ip, email)
+            : memCheckLockout(ip, email);
 
         if (lockStatus.locked) {
             const { retryAfter } = lockStatus;
-            await writeLog(
-                `LOGIN_BLOCKED\tip=${ip}\temail=${email || 'unknown'}\tretryAfter=${retryAfter}s`
-            );
+
+            if (redisAvailable) {
+                await writeLog(
+                    `LOGIN_BLOCKED\tip=${ip}\temail=${email || 'unknown'}\tretryAfter=${retryAfter}s`
+                );
+            }
+
             return res.status(429).json({
                 success:    false,
                 error:      'LOGIN_LOCKED',
@@ -222,40 +291,34 @@ export const loginAttemptGuard = async (req, res, next) => {
         }
 
         // ── Step 2: Intercept res.json to rewrite the response in-flight ──────
-        //
-        // This is the critical fix: instead of res.on('finish') which fires
-        // AFTER the response is sent, we intercept res.json so we can:
-        //   • increment the counter synchronously
-        //   • change the status code to 429 and swap the body — all before
-        //     a single byte reaches the client.
-        //
         const originalJson = res.json.bind(res);
 
         res.json = async function guardedJson(body) {
-            // Restore immediately to prevent any chance of double-interception
             res.json = originalJson;
 
             try {
                 const httpStatus = res.statusCode;
 
-                // ── Successful login — wipe counters ──────────────────────────
+                // Successful login — wipe counters
                 if (httpStatus === 200 && body?.success === true) {
-                    resetLoginAttempts(ip, email).catch((err) => {
-                        console.error('[LoginGuard] Reset error:', err.message);
-                    });
+                    if (redisAvailable) {
+                        resetLoginAttempts(ip, email).catch(err =>
+                            console.error('[LoginGuard] Reset error:', err.message)
+                        );
+                    } else {
+                        memResetAttempts(ip, email);
+                    }
                     return originalJson(body);
                 }
 
-                // ── Failed credentials — increment; lock if threshold reached ─
-                // 403 (inactive account / no shift) is intentionally excluded:
-                // it is not a wrong-password signal and should not count.
+                // Failed credentials (400) — increment; lock if threshold reached
+                // 403 (inactive account / no shift) intentionally excluded
                 if (httpStatus === 400 && body?.success === false) {
-                    const result = await recordAndCheck(ip, email);
+                    const result = redisAvailable
+                        ? await recordAndCheck(ip, email)
+                        : memRecordAndCheck(ip, email);
 
                     if (result.locked) {
-                        // Rewrite the response to 429 on the spot — the client
-                        // receives the lockout message on the very attempt that
-                        // triggered the lock, not the next one.
                         res.status(429);
                         return originalJson({
                             success:    false,
@@ -269,13 +332,12 @@ export const loginAttemptGuard = async (req, res, next) => {
                 console.error('[LoginGuard] Intercept error:', err.message);
             }
 
-            // Default: pass through unchanged
             return originalJson(body);
         };
 
         return next();
     } catch (err) {
         console.error('[LoginGuard] Unexpected error:', err.message);
-        return next(); // Fail open — never block legitimate logins due to our own error
+        return next();
     }
 };

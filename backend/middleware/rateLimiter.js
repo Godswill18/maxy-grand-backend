@@ -1,15 +1,16 @@
 /**
  * Rate Limiter Middleware — Maxy Grand Hotel
  * ==========================================
- * Algorithm  : Sliding Window (Redis sorted sets) — atomic via Lua
- * Store      : Redis (centralized, works across multiple app instances)
+ * Algorithm  : Sliding Window — atomic via Lua when Redis is available,
+ *              in-memory Map fallback when Redis is unavailable.
+ * Store      : Redis (primary, centralized) → in-memory (fallback, single-process)
  * Features   :
  *   - Role-based limit multipliers
  *   - IP-based + User-based keying
  *   - Standard X-RateLimit-* headers + Retry-After
  *   - Violation logging to backend/logs/rateLimitViolations.log
- *   - CAPTCHA trigger after repeated violations
- *   - Graceful fail-open when Redis is unavailable
+ *   - CAPTCHA trigger after repeated violations (Redis mode only)
+ *   - Graceful in-memory fallback when Redis is unavailable
  */
 
 import fsPromises from 'fs/promises';
@@ -39,14 +40,7 @@ const ROLE_MULTIPLIERS = {
     guest:        1,
 };
 
-// ─── Atomic Sliding-Window Lua Script ─────────────────────────────────────────
-// Keys   : KEYS[1]  = Redis sorted-set key
-// Args   : ARGV[1]  = now (ms epoch)
-//          ARGV[2]  = window duration (ms)
-//          ARGV[3]  = effective request limit
-//          ARGV[4]  = unique request ID (member in sorted set)
-//
-// Returns: {allowed, remaining, count, retryAfterSeconds}
+// ─── Atomic Sliding-Window Lua Script (Redis) ──────────────────────────────────
 const SLIDING_WINDOW_LUA = `
 local key        = KEYS[1]
 local now        = tonumber(ARGV[1])
@@ -54,7 +48,6 @@ local window_ms  = tonumber(ARGV[2])
 local lim        = tonumber(ARGV[3])
 local req_id     = ARGV[4]
 
--- Evict entries outside the window
 redis.call('ZREMRANGEBYSCORE', key, 0, now - window_ms)
 
 local count = redis.call('ZCARD', key)
@@ -73,12 +66,52 @@ else
 end
 `;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── In-Memory Sliding-Window Fallback ────────────────────────────────────────
+// Used automatically when Redis is unavailable.
+// Single-process only — not shared across Node.js cluster workers.
+// For multi-instance deployments, run Redis instead.
+//
+// Structure: Map<key, number[]>  (sorted array of request timestamps in ms)
+
+const memStore = new Map();
+
+// Clean up stale keys every 5 minutes so the Map doesn't grow unbounded.
+setInterval(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 h
+    for (const [key, timestamps] of memStore) {
+        if (!timestamps.length || timestamps[timestamps.length - 1] < cutoff) {
+            memStore.delete(key);
+        }
+    }
+}, 5 * 60 * 1000).unref();
 
 /**
- * Converts a retry-after duration in seconds into a human-readable string.
- * e.g. 47 → "47 seconds"  |  60 → "1 minute"  |  120 → "2 minutes"
+ * In-memory equivalent of the Lua sliding-window script.
+ * Returns the same 4-element tuple: [allowed, remaining, count, retryAfterSeconds]
  */
+function memoryCheck(key, windowMs, limit) {
+    const now         = Date.now();
+    const windowStart = now - windowMs;
+
+    // Retrieve and evict expired timestamps
+    let ts = (memStore.get(key) || []).filter(t => t > windowStart);
+
+    const count = ts.length;
+
+    if (count < limit) {
+        ts.push(now);
+        memStore.set(key, ts);
+        return [1, limit - count - 1, count + 1, 0];
+    }
+
+    // Denied — calculate when the oldest entry exits the window
+    const retryAfter = Math.ceil((ts[0] + windowMs - now) / 1000);
+    memStore.set(key, ts); // write back the cleaned array
+    return [0, 0, count, Math.max(1, retryAfter)];
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function formatRetryTime(seconds) {
     if (seconds <= 0) return 'a moment';
     if (seconds < 60) return `${seconds} second${seconds !== 1 ? 's' : ''}`;
@@ -87,7 +120,6 @@ function formatRetryTime(seconds) {
 }
 
 function getClientIp(req) {
-    // Respect X-Forwarded-For set by trusted Nginx proxy
     const forwarded = req.headers['x-forwarded-for'];
     if (forwarded) return forwarded.split(',')[0].trim();
     return (
@@ -107,19 +139,17 @@ function buildRedisKeys(prefix, keyType, ip, userId) {
     if ((keyType === 'user' || keyType === 'both') && userId) {
         keys.push(`rl:${prefix}:user:${userId}`);
     }
-    // Fall back to IP when no userId available (unauthenticated request)
     if (keys.length === 0) {
         keys.push(`rl:${prefix}:ip:${ip}`);
     }
     return keys;
 }
 
-// Most restrictive result across all keys (e.g., both IP and user keys)
 function pickMostRestrictive(results) {
     let worst = results[0];
     for (const r of results) {
-        if (!r[0]) return r;          // Any denied → immediately return denied
-        if (r[1] < worst[1]) worst = r; // Lower remaining = more restrictive
+        if (!r[0]) return r;
+        if (r[1] < worst[1]) worst = r;
     }
     return worst;
 }
@@ -167,11 +197,7 @@ export const createRateLimiter = ({
     const windowMs = windowSeconds * 1000;
 
     return async (req, res, next) => {
-        // ── Fail open when Redis is down ──────────────────────────────────────
-        if (!isRedisReady()) {
-            console.warn('[RateLimit] Redis unavailable — skipping rate limit check');
-            return next();
-        }
+        const redisAvailable = isRedisReady();
 
         try {
             const now    = Date.now();
@@ -188,28 +214,34 @@ export const createRateLimiter = ({
             if (multiplier === 0) return next();   // unlimited role
             const effectiveLimit = Math.ceil(limit * multiplier);
 
-            // ── Build Redis keys ──────────────────────────────────────────────
-            const keys   = buildRedisKeys(keyPrefix, keyType, ip, user?._id?.toString());
+            // ── Build keys ────────────────────────────────────────────────────
+            const keys = buildRedisKeys(keyPrefix, keyType, ip, user?._id?.toString());
 
-            // ── Evaluate sliding window (atomic) for each key ─────────────────
-            const results = await Promise.all(
-                keys.map(key =>
-                    redis.eval(
-                        SLIDING_WINDOW_LUA,
-                        1,
-                        key,
-                        now.toString(),
-                        windowMs.toString(),
-                        effectiveLimit.toString(),
-                        reqId,
+            // ── Evaluate sliding window ───────────────────────────────────────
+            let results;
+            if (redisAvailable) {
+                results = await Promise.all(
+                    keys.map(key =>
+                        redis.eval(
+                            SLIDING_WINDOW_LUA,
+                            1,
+                            key,
+                            now.toString(),
+                            windowMs.toString(),
+                            effectiveLimit.toString(),
+                            reqId,
+                        )
                     )
-                )
-            );
+                );
+            } else {
+                // In-memory fallback — synchronous, no await needed
+                results = keys.map(key => memoryCheck(key, windowMs, effectiveLimit));
+            }
 
             const [allowed, remaining, , retryAfter] = pickMostRestrictive(results);
             const resetTs = Math.ceil((now + windowMs) / 1000);
 
-            // ── Set standard rate-limit headers ───────────────────────────────
+            // ── Standard rate-limit headers ───────────────────────────────────
             res.set({
                 'X-RateLimit-Limit':     effectiveLimit,
                 'X-RateLimit-Remaining': Math.max(0, remaining),
@@ -218,50 +250,59 @@ export const createRateLimiter = ({
             });
 
             if (!allowed) {
-                // ── Denied ────────────────────────────────────────────────────
                 res.set('Retry-After', retryAfter);
 
-                // Track violation count in Redis (24 h window)
-                const violationKey   = `rl:violations:ip:${ip}`;
-                const violationCount = await redis.incr(violationKey);
-                await redis.expire(violationKey, 86400);
+                // Violation tracking + CAPTCHA — Redis only (not critical in fallback)
+                if (redisAvailable) {
+                    const violationKey   = `rl:violations:ip:${ip}`;
+                    const violationCount = await redis.incr(violationKey);
+                    await redis.expire(violationKey, 86400);
 
-                // Write to violations log
-                await writeViolationLog(
-                    `RATE_LIMIT_EXCEEDED\t` +
-                    `endpoint=${keyPrefix}\t` +
-                    `method=${req.method}\t` +
-                    `path=${req.originalUrl}\t` +
-                    `ip=${ip}\t` +
-                    `userId=${user?._id || 'unauthenticated'}\t` +
-                    `role=${role}\t` +
-                    `limit=${effectiveLimit}/${windowSeconds}s\t` +
-                    `violations_24h=${violationCount}`
-                );
+                    await writeViolationLog(
+                        `RATE_LIMIT_EXCEEDED\t` +
+                        `endpoint=${keyPrefix}\t` +
+                        `method=${req.method}\t` +
+                        `path=${req.originalUrl}\t` +
+                        `ip=${ip}\t` +
+                        `userId=${user?._id || 'unauthenticated'}\t` +
+                        `role=${role}\t` +
+                        `limit=${effectiveLimit}/${windowSeconds}s\t` +
+                        `violations_24h=${violationCount}`
+                    );
 
-                // CAPTCHA trigger
-                let captchaRequired = false;
-                if (enableCaptcha && violationCount >= captchaThreshold) {
-                    await redis.set(`rl:captcha:ip:${ip}`, '1', 'EX', 3600); // 1 h
-                    captchaRequired = true;
-                    res.set('X-RateLimit-Captcha', 'required');
+                    let captchaRequired = false;
+                    if (enableCaptcha && violationCount >= captchaThreshold) {
+                        await redis.set(`rl:captcha:ip:${ip}`, '1', 'EX', 3600);
+                        captchaRequired = true;
+                        res.set('X-RateLimit-Captcha', 'required');
+                    }
+
+                    const retryDisplay    = formatRetryTime(retryAfter);
+                    const responseMessage = `${message} Please try again in ${retryDisplay}.`;
+
+                    return res.status(429).json({
+                        success:     false,
+                        error:       'RATE_LIMIT_EXCEEDED',
+                        message:     responseMessage,
+                        retryAfter,
+                        ...(captchaRequired && { captchaRequired: true }),
+                    });
                 }
 
-                // Build human-readable message with exact retry countdown
-                const retryDisplay   = formatRetryTime(retryAfter);
+                // Memory-mode denied response (no violation log / CAPTCHA)
+                const retryDisplay    = formatRetryTime(retryAfter);
                 const responseMessage = `${message} Please try again in ${retryDisplay}.`;
 
                 return res.status(429).json({
-                    success:         false,
-                    error:           'RATE_LIMIT_EXCEEDED',
-                    message:         responseMessage,
-                    retryAfter,                    // exact seconds (for frontend countdown timer)
-                    ...(captchaRequired && { captchaRequired: true }),
+                    success:    false,
+                    error:      'RATE_LIMIT_EXCEEDED',
+                    message:    responseMessage,
+                    retryAfter,
                 });
             }
 
-            // ── Allowed — check lingering CAPTCHA requirement ─────────────────
-            if (enableCaptcha) {
+            // ── Allowed — check lingering CAPTCHA flag (Redis only) ───────────
+            if (redisAvailable && enableCaptcha) {
                 const captchaFlag = await redis.get(`rl:captcha:ip:${ip}`);
                 if (captchaFlag) res.set('X-RateLimit-Captcha', 'required');
             }
@@ -269,50 +310,26 @@ export const createRateLimiter = ({
             return next();
         } catch (err) {
             console.error('[RateLimit] Unexpected error:', err.message);
-            return next(); // Fail open
+            return next(); // Fail open on unexpected error
         }
     };
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PRE-CONFIGURED LIMITERS — Redis Key Schema Reference:
-//
-//   rl:login:ip:{ip}                    — login attempts per IP
-//   rl:signup:ip:{ip}                   — signup attempts per IP
-//   rl:forgot-password:ip:{ip}          — password reset requests per IP
-//   rl:availability:ip:{ip}             — room availability checks per IP
-//   rl:booking:ip:{ip}                  — booking creation per IP (fallback)
-//   rl:booking:user:{userId}            — booking creation per authenticated user
-//   rl:payment:ip:{ip}                  — payment requests per IP (fallback)
-//   rl:payment:user:{userId}            — payment requests per user
-//   rl:admin:user:{userId}              — admin/staff API per user
-//   rl:general:ip:{ip}                  — global catch-all per IP
-//   rl:violations:ip:{ip}               — 24 h violation counter (for CAPTCHA)
-//   rl:captcha:ip:{ip}                  — CAPTCHA requirement flag (1 h TTL)
+// PRE-CONFIGURED LIMITERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * POST /api/users/login-user
- * POST /api/users/login-guest
- * 5 attempts / 1 minute per IP
- * Message example: "Too many login attempts. Please try again in 47 seconds."
- */
 export const loginLimiter = createRateLimiter({
     keyPrefix:        'login',
     limit:            5,
-    windowSeconds:    60,          // 1 minute rolling window
+    windowSeconds:    60,
     keyType:          'ip',
     message:          'Too many login attempts.',
     bypass:           ['superadmin'],
     enableCaptcha:    true,
-    captchaThreshold: 3,           // CAPTCHA after 3 violations in 24 h
+    captchaThreshold: 3,
 });
 
-/**
- * POST /api/users/create-user
- * 3 attempts / 1 minute per IP  — prevents mass account creation
- * Message example: "Too many signup attempts. Please try again in 1 minute."
- */
 export const signupLimiter = createRateLimiter({
     keyPrefix:        'signup',
     limit:            3,
@@ -324,11 +341,6 @@ export const signupLimiter = createRateLimiter({
     captchaThreshold: 3,
 });
 
-/**
- * POST /api/users/request-password-reset
- * 3 requests / 1 minute per IP
- * Message example: "Too many password reset requests. Please try again in 52 seconds."
- */
 export const forgotPasswordLimiter = createRateLimiter({
     keyPrefix:        'forgot-password',
     limit:            3,
@@ -340,12 +352,6 @@ export const forgotPasswordLimiter = createRateLimiter({
     captchaThreshold: 2,
 });
 
-/**
- * POST /api/bookings/create-with-payment
- * POST /api/bookings/create-walkin
- * 5 attempts / 1 minute per user + IP
- * Message example: "Too many booking attempts. Please try again in 1 minute."
- */
 export const bookingLimiter = createRateLimiter({
     keyPrefix:     'booking',
     limit:         5,
@@ -355,13 +361,6 @@ export const bookingLimiter = createRateLimiter({
     bypass:        ['superadmin'],
 });
 
-/**
- * GET  /api/rooms/available
- * GET  /api/rooms/available_rooms
- * GET  /api/rooms/get-all-rooms
- * POST /api/bookings/check-availability
- * 60 requests / 1 minute per IP  — generous but scraping-resistant
- */
 export const availabilityLimiter = createRateLimiter({
     keyPrefix:     'availability',
     limit:         60,
@@ -371,12 +370,6 @@ export const availabilityLimiter = createRateLimiter({
     bypass:        ['superadmin', 'admin'],
 });
 
-/**
- * POST /api/payments/verify
- * POST /api/payments/create
- * 5 requests / 1 minute per user + IP  — payment endpoints are critical
- * Message example: "Too many payment attempts. Please try again in 38 seconds."
- */
 export const paymentLimiter = createRateLimiter({
     keyPrefix:     'payment',
     limit:         5,
@@ -386,10 +379,6 @@ export const paymentLimiter = createRateLimiter({
     bypass:        ['superadmin'],
 });
 
-/**
- * /api/analytics, /api/dashboard, /api/reports, /api/performance
- * 300 requests / 1 minute per admin user
- */
 export const adminLimiter = createRateLimiter({
     keyPrefix:     'admin',
     limit:         300,
@@ -399,15 +388,13 @@ export const adminLimiter = createRateLimiter({
     bypass:        ['superadmin'],
 });
 
-/**
- * Global catch-all applied to all /api routes
- * 100 requests / 1 minute per IP
- */
 export const generalLimiter = createRateLimiter({
     keyPrefix:     'general',
-    limit:         10,
+    limit:         100,            // per IP per minute — staff/admin are bypassed below
     windowSeconds: 60,
     keyType:       'ip',
     message:       'Too many requests.',
-    bypass:        ['superadmin', 'admin'],
+    // All authenticated staff bypass the general catch-all; only unauthenticated
+    // IPs and guests are subject to the 100 req/min ceiling.
+    bypass:        ['superadmin', 'admin', 'receptionist', 'headWaiter', 'waiter', 'cleaner'],
 });

@@ -36,6 +36,7 @@ import roomCategoryRoutes from '../routes/roomCategoryRoutes.js';
 import announcementRoutes from '../routes/announcementRoutes.js';
 import { setupShiftCronJobs } from '../cron/shiftCronJobs.js';
 import {
+    abuseShield,
     loginLimiter,
     signupLimiter,
     forgotPasswordLimiter,
@@ -75,27 +76,24 @@ const io = new Server(server, {
 // ✅ Setup Socket.IO with enhanced configuration
 setupSocketIO(io);
 
-// ✅ This parses incoming JSON requests
-app.use(express.json());
-
-// (Optional) For form submissions
-app.use(express.urlencoded({ extended: true }));
-
 // ------------ CORS configuration -----------
 app.use(cors(corsOptions));
 
-app.get('/', (req, res) => {
-    res.send('API is running...');
-});
+// ── LAYER 1: Abuse Shield — runs BEFORE body parsing ──────────────────────────
+// Must be first so large/rapid POST bodies cannot exhaust memory before this
+// check fires. Blocks any IP sending >60 requests in 10 seconds.
+// Progressive lockout: 1 min → 5 min → 30 min → 1 hr.
+// Only the offending IP is blocked; every other user is completely unaffected.
+app.use(abuseShield);
+// ──────────────────────────────────────────────────────────────────────────────
 
-
-app.use(express.json({ limit: "5mb" })); // Middleware to parse JSON requests || to parse incoming JSON data  [ Limit shouldn't be too high, as it can lead to performance issues or security vulnerabilities DOS ]
-app.use(express.urlencoded({ extended: false })); // Middleware to parse URL-encoded data || to parse form data(urlencoded)
+// ── Body parsing (after the abuse shield) ─────────────────────────────────────
+// 5 MB cap prevents memory exhaustion from oversized request bodies.
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // ------ Middleware --------
-// pass cookies through here 
 app.use(cookieParser());
-// app.use(errorHandler); // Error handling middleware
 
 // Logger middleware
 app.use(logger);
@@ -106,32 +104,34 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/', (req, res) => {
+    res.send('API is running...');
+});
 
-
-// ── Rate Limiters (applied before route handlers) ─────────────────────────────
+// ── LAYER 2: Endpoint Rate Limiters ───────────────────────────────────────────
 // Public auth endpoints — IP-based, strict limits
-app.use('/api/users/login-user', loginLimiter);
-app.use('/api/users/login-guest', loginLimiter);
-app.use('/api/users/create-user', signupLimiter);
-app.use('/api/users/request-password-reset', forgotPasswordLimiter);
-app.use('/api/users/forgot-password', forgotPasswordLimiter);
+app.use('/api/users/login-user',              loginLimiter);
+app.use('/api/users/login-guest',             loginLimiter);
+app.use('/api/users/create-user',             signupLimiter);
+app.use('/api/users/request-password-reset',  forgotPasswordLimiter);
+app.use('/api/users/forgot-password',         forgotPasswordLimiter);
 
 // Review submission — public endpoint, rate-limited per IP
 app.use('/api/reviews/submit', reviewSubmitLimiter);
 app.use('/api/reviews/validate-token', reviewSubmitLimiter);
 
 // Public room availability — IP-based, generous but scraping-resistant
-app.use('/api/rooms/get-all-rooms', availabilityLimiter);
-app.use('/api/rooms/available', availabilityLimiter);
-app.use('/api/rooms/available_rooms', availabilityLimiter);
+app.use('/api/rooms/get-all-rooms',    availabilityLimiter);
+app.use('/api/rooms/available',        availabilityLimiter);
+app.use('/api/rooms/available_rooms',  availabilityLimiter);
 
 // Admin/staff dashboards — user-based, high limits
-app.use('/api/analytics', adminLimiter);
-app.use('/api/dashboard', adminLimiter);
+app.use('/api/analytics',   adminLimiter);
+app.use('/api/dashboard',   adminLimiter);
 app.use('/api/performance', adminLimiter);
-app.use('/api/reports', adminLimiter);
+app.use('/api/reports',     adminLimiter);
 
-// Global catch-all — 100 req/min per IP (protects all remaining endpoints)
+// Global catch-all — 100 req/min per IP (authenticated staff are bypassed)
 app.use('/api', generalLimiter);
 // ──────────────────────────────────────────────────────────────────────────────
 

@@ -21369,3 +21369,9 @@
 20260304	15:33:33	664b5990-0e87-4a15-a22b-d9f86873824c	GET	http://localhost:8080	/api/payments/all
 20260304	15:33:37	e2dc4468-eba5-46b3-b96e-2e669159c84a	GET	http://localhost:8080	/api/shifts?
 20260304	15:33:37	3e40c655-478f-48b7-a447-4dcfecd5c109	GET	http://localhost:8080	/api/users/get-all-staff
+20260304	16:40:11	49349a96-95fa-4698-b274-c1a671de6f0a	GET	http://localhost:8081	/api/announcements/public
+20260304	16:40:12	28e460b0-0db7-4475-aa22-5c3a6bd9319a	GET	http://localhost:8081	/api/rooms/get-all-rooms
+20260304	16:40:13	d84a671b-3c1e-4dd7-be82-3a66d3a3d756	GET	http://localhost:8081	/api/blogs/live
+20260304	16:42:31	dfadc324-2467-4445-b309-b6887e74f49c	GET	http://localhost:8081	/api/rooms/get-all-rooms
+20260304	16:42:31	dd1d5bb5-5bca-4221-928d-d4b194d54256	GET	http://localhost:8081	/api/announcements/public
+20260304	16:42:31	3e17fbd3-fdc2-4b0f-a6d2-c21a84465bf7	GET	http://localhost:8081	/api/blogs/live

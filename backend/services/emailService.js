@@ -240,3 +240,87 @@ export async function sendPasswordChangedConfirmation(email, firstName) {
         html,
     });
 }
+
+/**
+ * Send a post-checkout review invitation email.
+ * Called non-blocking (via setImmediate) inside checkOutGuest controller.
+ *
+ * @param {string} email       Guest email address
+ * @param {string} guestName   Guest's full name
+ * @param {object} booking     Booking document (checkInDate, checkOutDate, confirmationCode)
+ * @param {string} reviewLink  One-time review URL with raw token
+ */
+export async function sendReviewInvitationEmail(email, guestName, booking, reviewLink) {
+    const firstName = guestName ? guestName.split(' ')[0] : 'Guest';
+
+    const fmt = (d) =>
+        new Date(d).toLocaleDateString('en-US', {
+            weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+        });
+
+    const checkIn  = booking.checkInDate  ? fmt(booking.checkInDate)  : '—';
+    const checkOut = booking.checkOutDate ? fmt(booking.checkOutDate) : '—';
+
+    const html = layout(`
+        <h2 style="margin:0 0 20px;color:#1a1a2e;font-size:22px;">How Was Your Stay?</h2>
+        <p style="margin:0 0 12px;color:#555;font-size:15px;line-height:1.7;">Dear ${firstName},</p>
+        <p style="margin:0 0 24px;color:#555;font-size:15px;line-height:1.7;">
+          Thank you for choosing <strong>Maxy Grand Hotel</strong>. We hope your recent stay was exceptional.
+          We'd love to hear about your experience — your feedback helps us serve every guest better.
+        </p>
+        <!-- Stay summary -->
+        <table cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:28px;">
+          <tr>
+            <td style="background:#f8f9fa;border-radius:8px;padding:18px 20px;">
+              <p style="margin:0 0 8px;color:#1a1a2e;font-size:14px;font-weight:bold;">Your Stay Summary</p>
+              <p style="margin:0 0 4px;color:#666;font-size:14px;">&#128197;&nbsp; Check-in: <strong>${checkIn}</strong></p>
+              <p style="margin:0 0 4px;color:#666;font-size:14px;">&#128197;&nbsp; Check-out: <strong>${checkOut}</strong></p>
+            </td>
+          </tr>
+        </table>
+        <!-- CTA Button -->
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
+          <tr>
+            <td align="center" bgcolor="#d4af37" style="border-radius:6px;">
+              <a href="${reviewLink}"
+                 style="display:inline-block;padding:16px 44px;color:#1a1a2e;text-decoration:none;font-size:16px;font-weight:bold;border-radius:6px;">
+                &#11088; Leave a Review
+              </a>
+            </td>
+          </tr>
+        </table>
+        <!-- Expiry notice -->
+        <table cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:24px;">
+          <tr>
+            <td style="background:#fff8e1;border-left:4px solid #d4af37;padding:14px 18px;border-radius:0 6px 6px 0;">
+              <p style="margin:0;color:#7a6000;font-size:14px;">
+                &#9201;&nbsp; This link is valid for <strong>7 days</strong> and can only be used once.
+              </p>
+            </td>
+          </tr>
+        </table>
+        <!-- Fallback link -->
+        <p style="margin:0 0 6px;color:#888;font-size:13px;">If the button doesn't work, copy and paste this link:</p>
+        <p style="margin:0 0 28px;word-break:break-all;">
+          <a href="${reviewLink}" style="color:#1a1a2e;font-size:13px;">${reviewLink}</a>
+        </p>
+        <!-- Support note -->
+        <table cellpadding="0" cellspacing="0" style="width:100%;">
+          <tr>
+            <td style="background:#f8f9fa;border-radius:6px;padding:18px 20px;">
+              <p style="margin:0;color:#666;font-size:13px;line-height:1.7;">
+                Questions or concerns? Reach us at
+                <a href="mailto:info@official.maxygrandhotel.com" style="color:#1a1a2e;">info@official.maxygrandhotel.com</a>.
+                We look forward to welcoming you back.
+              </p>
+            </td>
+          </tr>
+        </table>
+    `);
+
+    return send({
+        to:      email,
+        subject: 'Share Your Experience — Maxy Grand Hotel',
+        html,
+    });
+}

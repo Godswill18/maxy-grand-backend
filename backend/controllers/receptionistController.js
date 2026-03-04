@@ -1,8 +1,11 @@
+import crypto from 'crypto';
 import Room from '../models/roomModel.js';
 import User from '../models/userModel.js';
 import Booking from '../models/bookingModel.js';
 import { Types } from 'mongoose';
 import RoomType from '../models/roomTypeModel.js';
+import ReviewToken from '../models/reviewTokenModel.js';
+import { sendReviewInvitationEmail } from '../services/emailService.js';
 // import nodemailer from 'nodemailer';
 
 // // Configure mail transporter
@@ -134,6 +137,37 @@ export const checkOutGuest = async (req, res) => {
     
     // 7. Save the booking
     await booking.save();
+
+    // 7a. Non-blocking: generate review token and send invitation email
+    setImmediate(async () => {
+      try {
+        // Enforce one token per booking
+        const existing = await ReviewToken.findOne({ bookingId: booking._id });
+        if (existing) return;
+
+        const rawToken  = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+        await ReviewToken.create({
+          bookingId: booking._id,
+          guestId:   booking.guestId || null,
+          hotelId:   booking.hotelId,
+          tokenHash,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        });
+
+        const guestEmail = booking.guestEmail;
+        if (guestEmail) {
+          const reviewLink = `${process.env.FRONTEND_URL}/review?token=${rawToken}`;
+          await sendReviewInvitationEmail(guestEmail, booking.guestName, booking, reviewLink);
+          console.log(`[ReviewToken] Invitation sent to ${guestEmail} for booking ${booking._id}`);
+        } else {
+          console.log(`[ReviewToken] No email on booking ${booking._id} — skipping invitation`);
+        }
+      } catch (reviewErr) {
+        console.error(`[ReviewToken] Failed for booking ${booking._id}:`, reviewErr.message);
+      }
+    });
 
     // 8. Get populated booking and emit update
     const populatedBooking = await Booking.findById(booking._id)

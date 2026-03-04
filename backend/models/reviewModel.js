@@ -34,9 +34,35 @@ const reviewSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    title: {
+      type: String,
+      default: null,
+      maxlength: 150,
+    },
+    serviceRating: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 5,
+    },
+    cleanlinessRating: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 5,
+    },
+    wouldRecommend: {
+      type: Boolean,
+      default: null,
+    },
   },
   { timestamps: true } // 'createdAt' will be our review date
 );
+
+// Indexes for fast dashboard queries
+reviewSchema.index({ hotelId: 1, createdAt: -1 });
+reviewSchema.index({ bookingId: 1 });
+reviewSchema.index({ createdAt: -1 });
 
 const Review = mongoose.model('Review', reviewSchema);
 export default Review;

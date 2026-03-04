@@ -398,3 +398,13 @@ export const generalLimiter = createRateLimiter({
     // IPs and guests are subject to the 100 req/min ceiling.
     bypass:        ['superadmin', 'admin', 'receptionist', 'headWaiter', 'waiter', 'cleaner'],
 });
+
+// 5 review submissions per hour per IP — public endpoint, no auth bypass
+export const reviewSubmitLimiter = createRateLimiter({
+    keyPrefix:     'review-submit',
+    limit:         5,
+    windowSeconds: 3600,
+    keyType:       'ip',
+    message:       'Too many review submissions. Please try again later.',
+    bypass:        [],
+});

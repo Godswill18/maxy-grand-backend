@@ -42,6 +42,7 @@ import {
     availabilityLimiter,
     adminLimiter,
     generalLimiter,
+    reviewSubmitLimiter,
 } from '../middleware/rateLimiter.js';
 
 
@@ -114,6 +115,10 @@ app.use('/api/users/login-guest', loginLimiter);
 app.use('/api/users/create-user', signupLimiter);
 app.use('/api/users/request-password-reset', forgotPasswordLimiter);
 app.use('/api/users/forgot-password', forgotPasswordLimiter);
+
+// Review submission — public endpoint, rate-limited per IP
+app.use('/api/reviews/submit', reviewSubmitLimiter);
+app.use('/api/reviews/validate-token', reviewSubmitLimiter);
 
 // Public room availability — IP-based, generous but scraping-resistant
 app.use('/api/rooms/get-all-rooms', availabilityLimiter);

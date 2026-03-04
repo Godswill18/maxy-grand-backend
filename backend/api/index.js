@@ -33,6 +33,7 @@ import shiftRoutes from '../routes/shiftRoutes.js';
 import blogsRoutes from '../routes/blogRoutes.js';
 import notificationRoutes from '../routes/notificationRoutes.js';
 import roomCategoryRoutes from '../routes/roomCategoryRoutes.js';
+import announcementRoutes from '../routes/announcementRoutes.js';
 import { setupShiftCronJobs } from '../cron/shiftCronJobs.js';
 import {
     loginLimiter,
@@ -152,6 +153,7 @@ app.use('/api/shifts', shiftRoutes); // shift routes
 app.use('/api/blogs', blogsRoutes); // blog routes
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/room-categories', roomCategoryRoutes); // room category routes
+app.use('/api/announcements', announcementRoutes); // announcement/promotion routes
 
 // Serve uploaded files statically
 app.use("/uploads", express.static("uploads"));

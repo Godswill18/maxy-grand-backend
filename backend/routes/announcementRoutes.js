@@ -4,33 +4,38 @@ import {
     updateAnnouncement,
     deleteAnnouncement,
     getAdminAnnouncements,
-    getActiveAnnouncement
+    getActiveAnnouncement,
+    toggleVisibility,
+    getStaffAnnouncement,
 } from '../controllers/announcementController.js';
-import { adminAndSuperAdminMiddleware } from '../middleware/authMiddleware.js';
+import { adminAndSuperAdminMiddleware, isStaffOrAdmin } from '../middleware/authMiddleware.js';
 import { protectedRoute } from '../middleware/protectedRoutes.js';
-// Use your Multer config for single image uploads
-import postImages from '../config/postMulter.js'; // Adjust path as needed
+import postImages from '../config/postMulter.js';
 
 const router = express.Router();
 
-// --- Public Route ---
-// Your homepage frontend will call this on page load
-router.get('/public/:hotelId', getActiveAnnouncement);
+// --- Public Route (no auth) ---
+router.get('/public', getActiveAnnouncement);
+
+// --- Staff Route (any logged-in staff/admin) ---
+router.get('/staff', protectedRoute, isStaffOrAdmin, getStaffAnnouncement);
 
 // --- Admin Routes ---
+router.get('/admin', protectedRoute, adminAndSuperAdminMiddleware, getAdminAnnouncements);
+
 router.post(
     '/',
     protectedRoute,
     adminAndSuperAdminMiddleware,
-    postImages.single('image'), // Assumes your multer uses 'image'
+    postImages.single('image'),
     createAnnouncement
 );
 
-router.get(
-    '/admin',
+router.patch(
+    '/:id/toggle-visibility',
     protectedRoute,
     adminAndSuperAdminMiddleware,
-    getAdminAnnouncements
+    toggleVisibility
 );
 
 router.patch(

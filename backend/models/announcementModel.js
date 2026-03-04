@@ -4,7 +4,8 @@ const announcementSchema = new mongoose.Schema({
     hotelId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Hotel',
-        required: true,
+        required: false, // null = global (superadmin-level)
+        default: null,
     },
     title: {
         type: String,
@@ -16,8 +17,8 @@ const announcementSchema = new mongoose.Schema({
         required: [true, 'Content is required'],
     },
     imageUrl: {
-        type: String, // File path to the image
-        required: [true, 'Image is required'],
+        type: String,
+        default: null,
     },
     status: {
         type: String,
@@ -25,12 +26,50 @@ const announcementSchema = new mongoose.Schema({
         default: 'draft',
         required: true,
     },
+    targetAudience: {
+        type: String,
+        enum: ['guest', 'staff', 'both'],
+        default: 'guest',
+    },
+    startDate: {
+        type: Date,
+        default: null,
+    },
+    endDate: {
+        type: Date,
+        default: null,
+    },
+    createdByRole: {
+        type: String,
+        enum: ['superadmin', 'admin'],
+        required: true,
+    },
+    ctaButtonText: {
+        type: String,
+        default: null,
+        trim: true,
+    },
+    ctaButtonUrl: {
+        type: String,
+        default: null,
+        trim: true,
+    },
+    priority: {
+        type: Number,
+        default: 0,
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true,
     },
 }, { timestamps: true });
+
+// Compound indexes for efficient queries
+announcementSchema.index({ hotelId: 1, status: 1, targetAudience: 1 });
+announcementSchema.index({ status: 1, targetAudience: 1 });
+announcementSchema.index({ startDate: 1, endDate: 1 });
+announcementSchema.index({ priority: -1, createdAt: -1 });
 
 const Announcement = mongoose.model('Announcement', announcementSchema);
 

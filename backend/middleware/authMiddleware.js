@@ -105,3 +105,10 @@ export const receptionistMiddleware = (req, res, next) => {
     res.status(403).json({ message: 'Access denied. Receptionist role required.' });
   }
 };
+export const receptionistAdminMiddleware  = (req, res, next) => {
+  if ( req.user.role === 'receptionist' || req.user.role === 'admin' || req.user.role === 'superadmin') {
+    next(); // User is a receptionist, proceed
+  } else {
+    res.status(403).json({ message: 'Access denied. Receptionist role required.' });
+  }
+};

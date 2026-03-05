@@ -20,24 +20,24 @@ import {
   getExpectedCheckOuts,
   updateRoomStatus
 } from '../controllers/receptionistController.js';
-import { isStaffOrAdmin, receptionistMiddleware } from '../middleware/authMiddleware.js';
+import { isStaffOrAdmin, receptionistMiddleware, receptionistAdminMiddleware } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // ===== ROOM MANAGEMENT =====
 router.get('/rooms', protectedRoute, isStaffOrAdmin, getAllRooms);
 router.get('/rooms/available', protectedRoute, receptionistMiddleware, getAvailableRooms);
-router.post('/rooms/available-range', protectedRoute, receptionistMiddleware, findAvailableRoomsForRange);
+router.post('/rooms/available-range', protectedRoute, receptionistAdminMiddleware, findAvailableRoomsForRange);
 router.post('/rooms/:roomId/clean', protectedRoute, receptionistMiddleware, requestCleaning);
 
 // ===== BOOKING MANAGEMENT =====
-router.get('/dashboard/bookings', protectedRoute, receptionistMiddleware, getDashboardBookings);
-router.post('/book-guest', protectedRoute, receptionistMiddleware, bookGuest);
+router.get('/dashboard/bookings', protectedRoute, receptionistAdminMiddleware, getDashboardBookings);
+router.post('/book-guest', protectedRoute, receptionistAdminMiddleware, bookGuest);
 
 // ===== CHECK-IN / CHECK-OUT =====
-router.patch('/:bookingId/check-in', protectedRoute, receptionistMiddleware, updateBookingStatusCheckIn);
-router.patch('/:bookingId/check-out', protectedRoute, receptionistMiddleware, checkOutGuest);
-router.patch('/:bookingId/extend', protectedRoute, receptionistMiddleware, extendGuestStay); // NEW
+router.patch('/:bookingId/check-in', protectedRoute, receptionistAdminMiddleware, updateBookingStatusCheckIn);
+router.patch('/:bookingId/check-out', protectedRoute, receptionistAdminMiddleware, checkOutGuest);
+router.patch('/:bookingId/extend', protectedRoute, receptionistAdminMiddleware, extendGuestStay); // NEW
 router.patch('/rooms/:roomId/status', protectedRoute, isStaffOrAdmin, updateRoomStatus); // NEW
 
 // ===== ALERTS & NOTIFICATIONS =====

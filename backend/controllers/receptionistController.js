@@ -4,6 +4,8 @@ import User from '../models/userModel.js';
 import Booking from '../models/bookingModel.js';
 import { Types } from 'mongoose';
 import RoomType from '../models/roomTypeModel.js';
+import CleaningRequest from '../models/cleaningRequestModel.js';
+import Review from '../models/reviewModel.js';
 import ReviewToken from '../models/reviewTokenModel.js';
 import { sendReviewInvitationEmail } from '../services/emailService.js';
 // import nodemailer from 'nodemailer';
@@ -135,16 +137,29 @@ export const checkOutGuest = async (req, res) => {
       }
     }
     
-    // 7. Save the booking
+    // 7. Record the actual checkout timestamp and save the booking
+    booking.actualCheckOutAt = new Date();
     await booking.save();
+    console.log(`[Checkout] Booking ${booking._id} checked out at ${booking.actualCheckOutAt.toISOString()}`);
 
     // 7a. Non-blocking: generate review token and send invitation email
     setImmediate(async () => {
       try {
-        // Enforce one token per booking
-        const existing = await ReviewToken.findOne({ bookingId: booking._id });
-        if (existing) return;
+        // Guard 1: skip if a review was already submitted for this booking
+        const reviewExists = await Review.exists({ bookingId: booking._id });
+        if (reviewExists) {
+          console.log(`[ReviewToken] Review already submitted for booking ${booking._id} — skipping`);
+          return;
+        }
 
+        // Guard 2: skip if a token was already issued (prevents re-send on duplicate checkout calls)
+        const tokenExists = await ReviewToken.exists({ bookingId: booking._id });
+        if (tokenExists) {
+          console.log(`[ReviewToken] Token already exists for booking ${booking._id} — skipping`);
+          return;
+        }
+
+        // Generate a cryptographically secure one-time token
         const rawToken  = crypto.randomBytes(32).toString('hex');
         const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
 
@@ -155,14 +170,15 @@ export const checkOutGuest = async (req, res) => {
           tokenHash,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
         });
+        console.log(`[ReviewToken] Token created for booking ${booking._id}`);
 
         const guestEmail = booking.guestEmail;
         if (guestEmail) {
           const reviewLink = `${process.env.FRONTEND_URL}/review?token=${rawToken}`;
           await sendReviewInvitationEmail(guestEmail, booking.guestName, booking, reviewLink);
-          console.log(`[ReviewToken] Invitation sent to ${guestEmail} for booking ${booking._id}`);
+          console.log(`[ReviewToken] Invitation sent → ${guestEmail} (booking ${booking._id})`);
         } else {
-          console.log(`[ReviewToken] No email on booking ${booking._id} — skipping invitation`);
+          console.log(`[ReviewToken] No email on booking ${booking._id} — invitation skipped`);
         }
       } catch (reviewErr) {
         console.error(`[ReviewToken] Failed for booking ${booking._id}:`, reviewErr.message);

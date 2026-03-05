@@ -17,7 +17,7 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_ADDRESS = '"Maxy Grand Hotel" <info@maxygrandhotel.com>';
+const FROM_ADDRESS = '"Maxy Grand Hotel" <info@official.maxygrandhotel.com>';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -227,7 +227,7 @@ export async function sendPasswordChangedConfirmation(email, firstName) {
               <p style="margin:0;color:#c53030;font-size:14px;line-height:1.7;">
                 &#9888;&nbsp; <strong>Wasn't you?</strong> Your account may be compromised.
                 Please contact our support team immediately at
-                <a href="mailto:info@maxygrandhotel.com" style="color:#c53030;">info@maxygrandhotel.com</a>.
+                <a href="mailto:info@official.maxygrandhotel.com" style="color:#c53030;">info@official.maxygrandhotel.com</a>.
               </p>
             </td>
           </tr>
@@ -310,7 +310,7 @@ export async function sendReviewInvitationEmail(email, guestName, booking, revie
             <td style="background:#f8f9fa;border-radius:6px;padding:18px 20px;">
               <p style="margin:0;color:#666;font-size:13px;line-height:1.7;">
                 Questions or concerns? Reach us at
-                <a href="mailto:info@maxygrandhotel.com" style="color:#1a1a2e;">info@maxygrandhotel.com</a>.
+                <a href="mailto:info@official.maxygrandhotel.com" style="color:#1a1a2e;">info@official.maxygrandhotel.com</a>.
                 We look forward to welcoming you back.
               </p>
             </td>

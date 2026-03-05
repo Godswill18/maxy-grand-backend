@@ -74,6 +74,11 @@ const bookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'checked-in', 'checked-out', 'cancelled'],
     default: 'pending',
   },
+  // Actual timestamp when the receptionist processed checkout (not the scheduled checkOutDate)
+  actualCheckOutAt: {
+    type: Date,
+    default: null,
+  },
   confirmationCode: {
     type: String,
     required: true,

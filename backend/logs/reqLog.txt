@@ -21473,3 +21473,13 @@
 20260305	19:55:05	d63801c4-fe51-4288-aa43-2402100c93b1	GET	http://localhost:8080	/api/receptionist/rooms
 20260305	19:55:35	bfb6a4b6-54a7-40ed-9ad9-ab3495ae00ee	GET	http://localhost:8080	/api/receptionist/rooms
 20260305	19:56:04	47fe951f-c115-4107-b09c-873741a3983f	GET	http://localhost:8080	/api/bookings/all
+20260305	20:04:14	f42e799a-f1d7-49d2-a853-8014157746f0	GET	http://localhost:8081	/api/rooms/get-all-rooms
+20260305	20:04:14	702d3679-9968-4d57-bbd1-1db9cbd5e181	GET	http://localhost:8081	/api/room-categories
+20260305	20:04:15	ecbc7de7-95c2-49cf-9c5d-001e00783319	GET	undefined	/uploads/Images/roomGallery/images-1766141641889.jpeg
+20260305	20:04:15	30743b6f-da31-4bb2-b8fa-e89bb4f03a94	GET	undefined	/uploads/Images/roomGallery/images-1766143264863.jpeg
+20260305	20:04:17	3f1db0e9-803c-4014-a8e4-3a45e0b7b0f0	GET	http://localhost:8081	/api/rooms/get-room/69220d78c3f184d9c8c9ff5a
+20260305	20:04:17	f043aaf7-1206-4592-8bcf-eae244912880	GET	undefined	/uploads/Images/roomGallery/images-1766143166595.jpeg
+20260305	20:04:17	fd930822-2c48-45de-a642-3e70274f1865	GET	undefined	/uploads/Images/roomGallery/images-1766143166597.jpeg
+20260305	20:05:52	c343720e-1e03-4bb3-a0c4-12900e8d52fc	GET	http://localhost:8081	/api/rooms/get-room/69220d78c3f184d9c8c9ff5a
+20260305	20:06:00	365d708d-0e0f-4eda-b29f-e307b3af2116	GET	http://localhost:8081	/api/rooms/get-room/69220d78c3f184d9c8c9ff5a
+20260305	20:06:03	8d43b94e-3c95-42af-82e6-f98445a75e15	GET	http://localhost:8081	/api/rooms/get-room/69220d78c3f184d9c8c9ff5a

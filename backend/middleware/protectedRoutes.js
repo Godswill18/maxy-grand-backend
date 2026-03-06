@@ -51,11 +51,24 @@ export const protectedRoute = async (req, res, next) => {
       });
     }
 
-    // 5. ✅ ATTACH FULL USER OBJECT to request
+    // 5. ✅ Shift-based access guard for staff roles
+    // Superadmin/admin/guest are excluded — their isActive is always true.
+    // For staff, the cron job sets isActive=false when their shift ends.
+    // Checking it here ensures stale JWTs cannot be used after shift end.
+    const STAFF_ROLES = ['receptionist', 'cleaner', 'waiter', 'headWaiter'];
+    if (STAFF_ROLES.includes(user.role) && !user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your shift has ended. Please log in again.',
+        code: 'SHIFT_ENDED',
+      });
+    }
+
+    // 6. ✅ ATTACH FULL USER OBJECT to request
     // This includes: _id, firstName, lastName, email, hotelId, role, etc.
     req.user = user;
 
-    // 6. Proceed to next middleware/controller
+    // 7. Proceed to next middleware/controller
     next();
 
   } catch (error) {

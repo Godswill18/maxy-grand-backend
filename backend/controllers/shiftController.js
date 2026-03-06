@@ -233,16 +233,25 @@ export const deactivateEmergencyShift = async (req, res) => {
         // Deactivate
         await shift.deactivateEmergency();
 
-        // Check if user should be deactivated
+        // If the user is now outside their scheduled shift, deactivate and force-logout immediately
         if (!shift.isCurrentlyActive()) {
             const user = await User.findById(shift.userId._id);
             if (user) {
                 user.isActive = false;
                 await user.save();
+
+                // Emit force logout so the frontend reacts immediately (no waiting for the cron)
+                if (req.io) {
+                    req.io.emit(`user:${shift.userId._id}:force:logout`, {
+                        message: 'Emergency access has been removed. You have been logged out.',
+                        reason: 'emergency_deactivated',
+                        timestamp: new Date().toISOString(),
+                    });
+                }
             }
         }
 
-        // Emit socket events
+        // Emit shift-level socket events
         if (req.io) {
             req.io.emit('shift:deactivated', shift);
             req.io.emit(`hotel:${shift.hotelId._id}:shift:deactivated`, shift);

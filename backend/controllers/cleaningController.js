@@ -756,16 +756,20 @@ export const getCleanerPerformanceMetrics = async (req, res) => {
     });
 
     const colorMap = {
-      'Standard': 'hsl(var(--info))',
-      'Deluxe': 'hsl(var(--primary))',
-      'Suite': 'hsl(var(--success))',
-      'Presidential': 'hsl(var(--warning))',
+      'Standard': '#6366f1',
+      'Deluxe': '#f59e0b',
+      'Suite': '#10b981',
+      'Presidential': '#ef4444',
     };
+
+    // Fallback palette for any room types not in colorMap
+    const fallbackColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#84cc16'];
+    let fallbackIndex = 0;
 
     const taskTypeData = Object.entries(taskTypeCounts).map(([name, value]) => ({
       name,
       value,
-      color: colorMap[name] || 'hsl(var(--secondary))',
+      color: colorMap[name] || fallbackColors[fallbackIndex++ % fallbackColors.length],
     }));
 
     // Performance metrics (calculated based on various factors)

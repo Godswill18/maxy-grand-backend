@@ -39,7 +39,7 @@ router.patch('/:id/accept', protectedRoute, cleanerMiddleware, acceptCleaningReq
 router.patch('/:id/start', protectedRoute, cleanerMiddleware, startCleaningTask);
 router.patch('/:id/complete', protectedRoute, cleanerMiddleware, completeCleaningTask);
 
-router.get('/performance/metrics', protectedRoute, cleanerMiddleware, getCleanerPerformanceMetrics);
+router.get('/cleaner-stats', protectedRoute, cleanerMiddleware, getCleanerPerformanceMetrics);
 router.get('/dashboard/overview', protectedRoute, cleanerMiddleware, getCleanerDashboardOverview);
 
 // --- Admin Routes (for management) ---

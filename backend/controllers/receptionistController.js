@@ -96,7 +96,7 @@ export const checkOutGuest = async (req, res) => {
             roomId: room._id,
             assignedCleaner: availableCleaner._id,
             requestedBy: req.user.id,
-            notes: `Automatic cleaning request after guest checkout from booking ${bookingId}`,
+            notes: `Room requires cleaning following guest checkout. Please prepare the room for the next guest.`,
             priority: 'High',
             status: 'pending',
             estimatedDuration: '30 min',
@@ -121,7 +121,7 @@ export const checkOutGuest = async (req, res) => {
             roomId: room._id,
             assignedCleaner: null, // Will be assigned later
             requestedBy: req.user.id,
-            notes: `Automatic cleaning request after guest checkout from booking ${bookingId} - No cleaner available`,
+            notes: `Room requires cleaning following guest checkout. Awaiting cleaner assignment — please accept this task when available.`,
             priority: 'High',
             status: 'pending',
             estimatedDuration: '30 min',
